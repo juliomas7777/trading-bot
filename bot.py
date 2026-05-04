@@ -33,8 +33,8 @@ import asyncio
 #           ⚙️  CONFIGURACIÓN PRINCIPAL
 # ═══════════════════════════════════════════════════════
 
-TELEGRAM_TOKEN  = os.getenv("TELEGRAM_TOKEN", "TU_TOKEN_AQUI")
-CHAT_ID         = os.getenv("CHAT_ID", "TU_CHAT_ID_AQUI")
+TELEGRAM_TOKEN  = os.getenv("8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y")
+CHAT_ID         = os.getenv("541470482")
 
 SCAN_INTERVAL_MINUTES = 5
 RSI_PERIOD            = 14
