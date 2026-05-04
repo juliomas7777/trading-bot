@@ -400,20 +400,23 @@ def format_message(sig: dict, rsi: float, tf: str) -> str:
     dec = 0 if p > 1000 else (2 if p > 10 else 5)
     f = f"{{:.{dec}f}}"
 
-    return (
-        f"{dot} {emo} *PATRÓN ARMÓNICO DETECTADO* {dot}
-"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"
-        f"🏷 *Activo:* {sig['symbol']}  |  {a_lb}
-"
-        f"🔶 *Patrón:* {sig['pattern']} {emo}
-"
-        f"⏱ *Temporalidad:* {tf_lb}
-"
-        f"📡 *Dirección:* {dir_t}
-"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ return (
+        f"{dot} {emo} *PATRÓN ARMÓNICO DETECTADO* {dot}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔹 *Activo:* {sig['symbol']} | {a_lb}\n"
+        f"🔸 *Patrón:* {sig['pattern']} {emo}\n"
+        f"⏱ *Temporalidad:* {tf_lb}\n"
+        f"↕️ *Dirección:* {dir_t}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📍 *NIVELES DE OPERACIÓN:*\n"
+        f"🔵 *Entrada ({sig['order_type']}):* {f.format(sig['entry'])}\n"
+        f"🔴 *Stop Loss:* {f.format(sig['sl'])}\n"
+        f"🟢 *TP1 (Fib 0.382):* {f.format(sig['tp1'])}\n"
+        f"🟢 *TP2 (Fib 0.618):* {f.format(sig['tp2'])}\n"
+        f"━━━━━━━━━━━━━━━━━━"
+       
+
+        
 "
         f"💰 *NIVELES DE OPERACIÓN:*
 "
