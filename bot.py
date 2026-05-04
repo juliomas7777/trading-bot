@@ -414,3 +414,44 @@ def format_message(sig: dict, rsi: float, tf: str) -> str:
         f"🟢 *TP2 (Fib 0.618):* {f.format(sig['tp2'])}\n"
         f"━━━━━━━━━━━━━━━━━━"
     )
+   async def main():
+    bot = Bot(token=TELEGRAM_TOKEN)
+    logger.info("🚀 Bot iniciado y patrullando el mercado...")
+    
+    while True:
+        try:
+            # Lista de activos
+            all_assets = [
+                (CRYPTO_ASSETS, "CRYPTO"),
+                (STOCKS_US, "STOCKS"),
+                (ETFS, "ETF"),
+                (FUTURES, "FUTURES"),
+                (FOREX_PAIRS, "FOREX")
+            ]
+
+            for asset_list, asset_type in all_assets:
+                for symbol in asset_list:
+                    if asset_type == "CRYPTO":
+                        df = fetch_ohlcv_binance(symbol, "5m")
+                    else:
+                        df = fetch_ohlcv_yahoo(symbol, "5m")
+
+                    if df is None or df.empty:
+                        continue
+
+                    signals = detect_harmonics(df, asset_type, symbol)
+                    
+                    if signals:
+                        rsi = calculate_rsi(df["close"])
+                        for sig in signals:
+                            text = format_message(sig, rsi, "5m")
+                            await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
+                            logger.info(f"✅ Señal enviada: {symbol}")
+            
+            await asyncio.sleep(300) 
+            
+        except Exception as e:
+            logger.error(f"Error: {e}")
+            await asyncio.sleep(60)
+if __name__=="main":
+asyncio.run(main())
