@@ -373,8 +373,47 @@ EMOJI_MAP = {
     "bat":       "🦇",
     "lightning": "⚡",
 }
-
 def format_message(sig: dict, rsi: float, tf: str) -> str:
+    dot = "🟢" if sig["is_bull"] else "🔴"
+    dir_t = "📈 ALCISTA" if sig["is_bull"] else "📉 BAJISTA"
+    emo = EMOJI_MAP.get(sig["emoji"], "📐")
+    tf_lb = TIMEFRAME_LABELS.get(tf, tf)
+
+    if rsi >= RSI_OVERBOUGHT:
+        rsi_s = f"🔥 SOBRECOMPRADO ({rsi})"
+        rsi_v = "⚠️ RSI sobrecompra - señal alcista con menor confianza"
+    elif rsi <= RSI_OVERSOLD:
+        rsi_s = f"❄️ SOBREVENDIDO ({rsi})"
+        rsi_v = "✅ RSI confirma SOBREVENDIDO - señal FUERTE"
+    else:
+        rsi_s = f"⚖️ Neutral ({rsi})"
+        rsi_v = "🔵 RSI neutral - operar con precaución"
+
+    asset_labels = {
+        "CRYPTO": "🟠 Criptomoneda", "STOCKS": "🟦 Acción",
+        "ETF": "📦 ETF", "FUTURES": "📜 Futuro", "FOREX": "🌍 Divisa"
+    }
+    a_lb = asset_labels.get(sig["asset_type"], sig["asset_type"])
+
+    p = sig["entry"]
+    dec = 0 if p > 1000 else (2 if p > 10 else 5)
+    f = f"{{:,.{dec}f}}"
+
+    return (
+        f"{dot} {emo} *PATRÓN ARMÓNICO DETECTADO* {dot}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔹 *Activo:* {sig['symbol']} | {a_lb}\n"
+        f"🔸 *Patrón:* {sig['pattern']} {emo}\n"
+        f"⏱ *Temporalidad:* {tf_lb}\n"
+        f"↕️ *Dirección:* {dir_t}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📍 *NIVELES DE OPERACIÓN:*\n"
+        f"🔵 *Entrada ({sig['order_type']}):* {f.format(sig['entry'])}\n"
+        f"🔴 *Stop Loss:* {f.format(sig['sl'])}\n"
+        f"🟢 *TP1 (Fib 0.382):* {f.format(sig['tp1'])}\n"
+        f"🟢 *TP2 (Fib 0.618):* {f.format(sig['tp2'])}\n"
+        f"━━━━━━━━━━━━━━━━━━"
+    )
     dot   = "🟢" if sig["is_bull"] else "🔴"
     dir_t = "📈 ALCISTA" if sig["is_bull"] else "📉 BAJISTA"
     emo   = EMOJI_MAP.get(sig["emoji"], "📐")
