@@ -450,8 +450,10 @@ def format_message(sig: dict, rsi: float, tf: str) -> str:
             
             await asyncio.sleep(300) 
             
+       await asyncio.sleep(300)
         except Exception as e:
             logger.error(f"Error: {e}")
             await asyncio.sleep(60)
-if __name__=="main":
-asyncio.run(main())
+
+if__name__== "main":
+asyncio.run(main()) 
