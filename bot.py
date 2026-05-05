@@ -17,7 +17,7 @@ registro_velas = {}
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Diccionario de traducción de nombres
+# Traducción de activos para el mensaje
 TRADUCCION_NOMBRES = {
     "GC=F": "ORO 🟡",
     "^GSPC": "SP500 🇺🇸",
@@ -33,52 +33,26 @@ TRADUCCION_NOMBRES = {
 
 ASSETS = {
     "CRYPTO": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"],
-    "FOREX_METALES_INDICES": ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "GC=F", "^GSPC"]
+    "FOREX_INDICES_METALES": ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "GC=F", "^GSPC"]
 }
 
-TIMEFRAMES = ["15m", "1h", "4h"]
+TIMEFRAMES = ["5m", "15m", "1h", "4h"]
 
 # ==========================================
-# 🧠 ESTRATEGIA 1: RSI RETORNO (CROSSOVER)
+# 📐 ESTRATEGIA: PATRONES ARMÓNICOS
 # ==========================================
-def analizar_rsi_atr(df):
-    if len(df) < 15: return None
-    
-    delta = df['c'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean().replace(0, 0.0001)
-    df['rsi'] = 100 - (100 / (1 + (gain / loss)))
-    df['atr'] = (df['h'] - df['l']).rolling(14).mean()
-    
-    # Necesitamos la vela actual y la anterior para detectar el cruce
-    actual = df.iloc[-1]
-    previa = df.iloc[-2]
-    
-    price = actual['c']
-    atr = actual['atr'] if actual['atr'] > 0 else price * 0.005
-    
-    # Lógica de CRUCE (Crossover)
-    # COMPRA: El RSI estaba abajo (<25) y ahora cruza hacia arriba (>25)
-    if previa['rsi'] <= 25 and actual['rsi'] > 25:
-        return {"tipo": "RSI RETORNO COMPRA 🔵", "sl": price-(atr*2), "tp": price+(atr*1.5)}
-    
-    # VENTA: El RSI estaba arriba (>75) y ahora cruza hacia abajo (<75)
-    if previa['rsi'] >= 75 and actual['rsi'] < 75:
-        return {"tipo": "RSI RETORNO VENTA 🔴", "sl": price+(atr*2), "tp": price-(atr*1.5)}
-        
-    return None
-
-# ==========================================
-# 📐 ESTRATEGIA 2: PATRONES ARMÓNICOS
-# ==========================================
-def detectar_armonicos(df):
-    if len(df) < 20: return None
+def detectar_armonico(df):
+    if len(df) < 10: return None
     p = df['c'].values
     try:
+        # Puntos X, A, B, C, D
         X, A, B, C, D = p[-5], p[-4], p[-3], p[-2], p[-1]
         XA, AB, BC, CD = A-X, B-A, C-B, D-C
         if XA == 0 or AB == 0: return None
-        ret_AB, ret_AD = abs(AB/XA), abs((D-X)/XA)
+        
+        ret_AB = abs(AB/XA)
+        ret_AD = abs((D-X)/XA)
+        
         err = 0.06 
         patterns = [
             {"n": "GARTLEY", "B": 0.618, "D": 0.786},
@@ -86,47 +60,84 @@ def detectar_armonicos(df):
             {"n": "BUTTERFLY", "B": 0.786, "D": 1.27},
             {"n": "CRAB", "B": 0.382, "D": 1.618}
         ]
+        
         for pat in patterns:
             if abs(ret_AB - pat['B']) < err and abs(ret_AD - pat['D']) < err:
-                return {"nombre": pat['n'], "dir": "ALZA 🟢" if X < A else "BAJA 🔴"}
+                return {"nombre": pat['n'], "dir": "ALZA 🟢" if D < X else "BAJA 🔴"}
     except: return None
     return None
 
 # ==========================================
-# 📡 MOTOR DE TIEMPO REAL (-35 Segundos)
+# 🕯️ CONFIRMACIÓN: VELAS DE RECHAZO
+# ==========================================
+def confirmar_vela(df, direccion):
+    c1 = df.iloc[-1] # Actual
+    c2 = df.iloc[-2] # Anterior
+    c3 = df.iloc[-3] # Tras-anterior
+
+    body1 = abs(c1['c'] - c1['o'])
+    w_up1 = c1['h'] - max(c1['c'], c1['o'])
+    w_do1 = min(c1['c'], c1['o']) - c1['l']
+    
+    body2 = abs(c2['c'] - c2['o'])
+    tot2 = c2['h'] - c2['l']
+
+    if "ALZA" in direccion:
+        # 🟢 Engulfing (Envolvente)
+        if c1['c'] > c1['o'] and c2['c'] < c2['o'] and c1['c'] > c2['o']:
+            return "ENGULFING ALCISTA"
+        # 🟢 Pin Bar / Doji Rechazo
+        if w_do1 > (2 * body1) and w_up1 < (0.5 * w_do1):
+            return "PIN BAR / RECHAZO"
+        # 🟢 Morning Star
+        if c3['c'] < c3['o'] and body2 < (tot2 * 0.3) and c1['c'] > c1['o']:
+            return "MORNING STAR"
+            
+    if "BAJA" in direccion:
+        # 🔴 Engulfing (Envolvente)
+        if c1['c'] < c1['o'] and c2['c'] > c2['o'] and c1['c'] < c2['o']:
+            return "ENGULFING BAJISTA"
+        # 🔴 Pin Bar / Doji Rechazo
+        if w_up1 > (2 * body1) and w_do1 < (0.5 * w_up1):
+            return "PIN BAR / RECHAZO"
+        # 🔴 Evening Star
+        if c3['c'] > c3['o'] and body2 < (tot2 * 0.3) and c1['c'] < c1['o']:
+            return "EVENING STAR"
+
+    return None
+
+# ==========================================
+# 📡 MOTOR DE TIEMPO REAL
 # ==========================================
 async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("🚀 Bot Inteligente - RSI de Retorno + Armónicos (T-35s)")
+    logger.info("🚀 Bot Armónico Iniciado (T-35s)")
 
     while True:
         try:
             ahora = datetime.now(timezone.utc)
-            # Sincronizar a bloques de 15 min restando 35 segundos
-            espera = 900 - ((ahora.minute % 15) * 60 + ahora.second) - 35
-            if espera <= 0: espera += 900
-            
-            logger.info(f"💤 Esperando {espera}s para el próximo cierre de vela...")
+            espera = 300 - ((ahora.minute % 5) * 60 + ahora.second) - 35
+            if espera <= 0: espera += 300
             await asyncio.sleep(espera)
 
             hora_ref = datetime.now(timezone.utc)
             m, h = hora_ref.minute, hora_ref.hour
 
             for tf in TIMEFRAMES:
-                # Filtrar TF según la hora actual
-                if tf == "1h" and m < 45: continue
-                if tf == "4h" and (h % 4 != 3 or m < 45): continue
+                if tf == "15m" and (m % 15) < 14: continue
+                if tf == "1h" and m < 59: continue
+                if tf == "4h" and (h % 4 != 3 or m < 59): continue
 
                 for cat, symbols in ASSETS.items():
                     for sym in symbols:
                         try:
-                            # Descarga de datos
+                            # Descarga segura
                             if cat == "CRYPTO":
-                                url = f"https://api.binance.com/api/v3/klines?symbol={sym}&interval={tf}&limit=50"
+                                url = f"https://api.binance.com/api/v3/klines?symbol={sym}&interval={tf}&limit=30"
                                 r = requests.get(url, timeout=10).json()
                                 df = pd.DataFrame(r, columns=["ts","o","h","l","c","v","ct","qv","t","tbb","tbq","i"])
                             else:
-                                y_tf = "60m" if tf != "15m" else "15m"
+                                y_tf = "5m" if tf == "5m" else ("15m" if tf == "15m" else "60m")
                                 url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={y_tf}&range=5d"
                                 r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
                                 q = r["chart"]["result"][0]["indicators"]["quote"][0]
@@ -134,41 +145,29 @@ async def main():
                             
                             df = df[["o","h","l","c"]].astype(float).dropna()
                             
-                            # Análisis
-                            tec = analizar_rsi_atr(df)
-                            arm = detectar_armonicos(df)
-
-                            if tec or arm:
-                                id_s = f"{sym}_{tf}_{hora_ref.strftime('%H%M')}"
-                                if id_s not in registro_velas:
-                                    nombre_bonito = TRADUCCION_NOMBRES.get(sym, sym)
-                                    msg = f"🎯 *SEÑAL:* {nombre_bonito}\n"
-                                    msg += f"🕒 *TF:* {tf} (Pre-cierre)\n"
-                                    msg += "━━━━━━━━━━━━━━━━━━\n"
-                                    
-                                    if arm:
-                                        msg += f"📐 ESTRATEGIA: *PATRÓN {arm['nombre']}*\n"
-                                        msg += f"🧭 DIRECCIÓN: *{arm['dir']}*\n"
-                                    
-                                    if tec:
-                                        msg += f"📊 ESTRATEGIA: *{tec['tipo']}*\n"
-                                        msg += f"💰 ENTRADA: `{df['c'].iloc[-1]:.5f}`\n"
-                                        msg += f"🛑 SL: `{tec['sl']:.5f}`\n"
-                                        msg += f"🎯 TP: `{tec['tp']:.5f}`\n"
-                                    
-                                    msg += "━━━━━━━━━━━━━━━━━━\n"
-                                    msg += "⚠️ *Confirmar al cierre de vela*"
-                                    
-                                    await bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
-                                    registro_velas[id_s] = True
-                                    await asyncio.sleep(1)
+                            armonico = detectar_armonico(df)
+                            if armonico:
+                                confirmacion = confirmar_vela(df, armonico["dir"])
+                                if confirmacion:
+                                    id_s = f"{sym}_{tf}_{hora_ref.strftime('%H%M')}"
+                                    if id_s not in registro_velas:
+                                        nombre_bot = TRADUCCION_NOMBRES.get(sym, sym)
+                                        msg = f"🎯 *SEÑAL:* {nombre_bot}\n"
+                                        msg += f"🕒 TF: *{tf}*\n"
+                                        msg += "━━━━━━━━━━━━━━━━━━\n"
+                                        msg += f"📐 Armónico: *{armonico['nombre']}*\n"
+                                        msg += f"🕯️ Vela: *{confirmacion}*\n"
+                                        msg += f"🧭 Dirección: *{armonico['dir']}*\n"
+                                        msg += "━━━━━━━━━━━━━━━━━━\n"
+                                        msg += f"💰 Entrada: `{df['c'].iloc[-1]:.5f}`\n"
+                                        msg += "⚠️ *Confirmar al cierre*"
+                                        
+                                        await bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+                                        registro_velas[id_s] = True
                         except: continue
-
-            if len(registro_velas) > 100: registro_velas.clear()
-            await asyncio.sleep(40) # Pausa para no repetir escaneo en el mismo minuto
-
+            await asyncio.sleep(40)
         except Exception as e:
-            logger.error(f"❌ Error: {e}")
+            logger.error(f"Error: {e}")
             await asyncio.sleep(20)
 
 if __name__ == "__main__":
