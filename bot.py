@@ -39,25 +39,38 @@ ASSETS = {
 TIMEFRAMES = ["15m", "1h", "4h"]
 
 # ==========================================
-# 🧠 ESTRATEGIAS
+# 🧠 ESTRATEGIA 1: RSI RETORNO (CROSSOVER)
 # ==========================================
 def analizar_rsi_atr(df):
+    if len(df) < 15: return None
+    
     delta = df['c'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean().replace(0, 0.0001)
     df['rsi'] = 100 - (100 / (1 + (gain / loss)))
     df['atr'] = (df['h'] - df['l']).rolling(14).mean()
     
-    last = df.iloc[-1]
-    price = last['c']
-    atr = last['atr'] if last['atr'] > 0 else price * 0.005
+    # Necesitamos la vela actual y la anterior para detectar el cruce
+    actual = df.iloc[-1]
+    previa = df.iloc[-2]
     
-    if last['rsi'] < 25:
-        return {"tipo": "RSI SOBREVENTA 🔵", "sl": price-(atr*2), "tp": price+(atr*1.5)}
-    if last['rsi'] > 75:
-        return {"tipo": "RSI SOBRECOMPRA 🔴", "sl": price+(atr*2), "tp": price-(atr*1.5)}
+    price = actual['c']
+    atr = actual['atr'] if actual['atr'] > 0 else price * 0.005
+    
+    # Lógica de CRUCE (Crossover)
+    # COMPRA: El RSI estaba abajo (<25) y ahora cruza hacia arriba (>25)
+    if previa['rsi'] <= 25 and actual['rsi'] > 25:
+        return {"tipo": "RSI RETORNO COMPRA 🔵", "sl": price-(atr*2), "tp": price+(atr*1.5)}
+    
+    # VENTA: El RSI estaba arriba (>75) y ahora cruza hacia abajo (<75)
+    if previa['rsi'] >= 75 and actual['rsi'] < 75:
+        return {"tipo": "RSI RETORNO VENTA 🔴", "sl": price+(atr*2), "tp": price-(atr*1.5)}
+        
     return None
 
+# ==========================================
+# 📐 ESTRATEGIA 2: PATRONES ARMÓNICOS
+# ==========================================
 def detectar_armonicos(df):
     if len(df) < 20: return None
     p = df['c'].values
@@ -84,25 +97,30 @@ def detectar_armonicos(df):
 # ==========================================
 async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("🚀 Bot Multiactivo - Sincronizado (T-35s)")
+    logger.info("🚀 Bot Inteligente - RSI de Retorno + Armónicos (T-35s)")
 
     while True:
         try:
             ahora = datetime.now(timezone.utc)
+            # Sincronizar a bloques de 15 min restando 35 segundos
             espera = 900 - ((ahora.minute % 15) * 60 + ahora.second) - 35
             if espera <= 0: espera += 900
+            
+            logger.info(f"💤 Esperando {espera}s para el próximo cierre de vela...")
             await asyncio.sleep(espera)
 
             hora_ref = datetime.now(timezone.utc)
             m, h = hora_ref.minute, hora_ref.hour
 
             for tf in TIMEFRAMES:
+                # Filtrar TF según la hora actual
                 if tf == "1h" and m < 45: continue
                 if tf == "4h" and (h % 4 != 3 or m < 45): continue
 
                 for cat, symbols in ASSETS.items():
                     for sym in symbols:
                         try:
+                            # Descarga de datos
                             if cat == "CRYPTO":
                                 url = f"https://api.binance.com/api/v3/klines?symbol={sym}&interval={tf}&limit=50"
                                 r = requests.get(url, timeout=10).json()
@@ -115,6 +133,8 @@ async def main():
                                 df = pd.DataFrame({"o":q["open"],"h":q["high"],"l":q["low"],"c":q["close"]})
                             
                             df = df[["o","h","l","c"]].astype(float).dropna()
+                            
+                            # Análisis
                             tec = analizar_rsi_atr(df)
                             arm = detectar_armonicos(df)
 
@@ -125,14 +145,17 @@ async def main():
                                     msg = f"🎯 *SEÑAL:* {nombre_bonito}\n"
                                     msg += f"🕒 *TF:* {tf} (Pre-cierre)\n"
                                     msg += "━━━━━━━━━━━━━━━━━━\n"
+                                    
                                     if arm:
                                         msg += f"📐 ESTRATEGIA: *PATRÓN {arm['nombre']}*\n"
                                         msg += f"🧭 DIRECCIÓN: *{arm['dir']}*\n"
+                                    
                                     if tec:
                                         msg += f"📊 ESTRATEGIA: *{tec['tipo']}*\n"
                                         msg += f"💰 ENTRADA: `{df['c'].iloc[-1]:.5f}`\n"
                                         msg += f"🛑 SL: `{tec['sl']:.5f}`\n"
                                         msg += f"🎯 TP: `{tec['tp']:.5f}`\n"
+                                    
                                     msg += "━━━━━━━━━━━━━━━━━━\n"
                                     msg += "⚠️ *Confirmar al cierre de vela*"
                                     
@@ -142,7 +165,7 @@ async def main():
                         except: continue
 
             if len(registro_velas) > 100: registro_velas.clear()
-            await asyncio.sleep(40) 
+            await asyncio.sleep(40) # Pausa para no repetir escaneo en el mismo minuto
 
         except Exception as e:
             logger.error(f"❌ Error: {e}")
