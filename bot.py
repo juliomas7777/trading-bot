@@ -18,7 +18,7 @@ TOLERANCE       = 0.06
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── ACTIVOS ──
+# ── LISTA DE ACTIVOS ──
 CRYPTO_ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT", "LTCUSDT", "LINKUSDT", "ZECUSDT", "NEOUSDT", "MANAUSDT"]
 FOREX_PAIRS   = ["AUDUSD=X", "NZDUSD=X", "GBPUSD=X", "EURUSD=X", "USDJPY=X", "USDCHF=X", "USDCAD=X"]
 OTHER_ASSETS  = ["SPY", "ES=F", "GC=F", "NVDA"]
@@ -33,7 +33,7 @@ HARMONIC_PATTERNS = {
 }
 
 # ═══════════════════════════════════════════════════════
-#   📊  LÓGICA TÉCNICA
+#   📊  LÓGICA TÉCNICA REFORZADA
 # ═══════════════════════════════════════════════════════
 
 def fetch_data(symbol, tf, is_crypto):
@@ -48,8 +48,7 @@ def fetch_data(symbol, tf, is_crypto):
             q = r["chart"]["result"][0]["indicators"]["quote"][0]
             df = pd.DataFrame({"o":q["open"],"h":q["high"],"l":q["low"],"c":q["close"]})
         return df[["o","h","l","c"]].astype(float).dropna()
-    except:
-        return None
+    except: return None
 
 def analyze(series):
     try:
@@ -83,16 +82,16 @@ def check_pat(pts, name):
             pat["BCD"][0]*(1-t) <= r[2] <= pat["BCD"][1]*(1+t) and pat["XAD"][0]*(1-t) <= r[3] <= pat["XAD"][1]*(1+t))
 
 # ═══════════════════════════════════════════════════════
-#   🚀  SISTEMA DE TIEMPO EXACTO
+#   🚀  NÚCLEO DE TIEMPO FRANCOTIRADOR
 # ═══════════════════════════════════════════════════════
 
 async def run_bot():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("🚀 Bot Julio v6.0 Elite Online")
+    logger.info("🚀 Bot Julio v6.1 Elite Online")
 
     while True:
         try:
-            # Sincronización al segundo :35 del próximo múltiplo de 5
+            # Sincronización exacta al segundo :35
             now = datetime.now(timezone.utc)
             minutes_to_next = 5 - (now.minute % 5)
             target = now.replace(second=35, microsecond=0) + timedelta(minutes=minutes_to_next)
@@ -100,11 +99,12 @@ async def run_bot():
             if target <= now:
                 target += timedelta(minutes=5)
             
-            wait = (target - now).total_seconds()
-            logger.info(f"💤 Sincronizado. Próximo escaneo en {int(wait)}s ({target.strftime('%H:%M:%S')} UTC)")
-            await asyncio.sleep(wait)
+            wait_time = (target - now).total_seconds()
+            logger.info(f"💤 Sincronizado. Próximo escaneo en {int(wait_time)}s ({target.strftime('%H:%M:%S')} UTC)")
+            await asyncio.sleep(wait_time)
 
-            # --- ESCANEO ---
+            # --- INICIO DEL ESCANEO ---
+            logger.info("🔎 Escaneando mercado...")
             for tf in ["5m", "15m", "1h"]:
                 for assets, is_crypto in [(CRYPTO_ASSETS, True), (FOREX_PAIRS, False), (OTHER_ASSETS, False)]:
                     for sym in assets:
