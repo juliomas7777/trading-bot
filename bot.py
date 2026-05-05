@@ -6,14 +6,13 @@ from datetime import datetime, timezone
 from telegram import Bot
 
 # ═══════════════════════════════════════════════════════
-#           ⚙️  CONFIGURACIÓN Y MEMORIA
+#           ⚙️  CONFIGURACIÓN MAESTRA
 # ═══════════════════════════════════════════════════════
 TELEGRAM_TOKEN  = "8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y"
 CHAT_ID         = "541470482"
 
-# Esta es la llave para que no te sature:
-# Guarda la última señal enviada para no repetirla.
-memoria_senales = {} 
+# Registro para evitar duplicados: guarda (Símbolo + Minuto de la señal)
+registro_velas = {} 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -24,10 +23,11 @@ ASSETS = {
 }
 
 # ═══════════════════════════════════════════════════════
-#   🧠 ESTRATEGIA CON NIVELES REALES
+#   🧠 ESTRATEGIA TÉCNICA (RSI + ATR)
 # ═══════════════════════════════════════════════════════
 
-def analizar(df):
+def analizar_mercado(df):
+    # RSI con cálculo de precisión
     delta = df['c'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean().replace(0, 0.0001)
@@ -38,7 +38,7 @@ def analizar(df):
     price = last['c']
     atr = last['atr'] if last['atr'] > 0 else price * 0.005
     
-    # Filtros estrictos para evitar señales falsas
+    # Umbrales de alta probabilidad
     if last['rsi'] < 25:
         return {"tipo": "COMPRA 🔵", "sl": price-(atr*2), "tp1": price+(atr*1.5), "tp2": price+(atr*3)}
     if last['rsi'] > 75:
@@ -46,26 +46,35 @@ def analizar(df):
     return None
 
 # ═══════════════════════════════════════════════════════
-#   📡 EJECUCIÓN LIMPIA (SIN WARNINGS)
+#   📡 MOTOR DE TIEMPO REAL
 # ═══════════════════════════════════════════════════════
 
 async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("✅ Julio v10.0 iniciado. Limpiando advertencias...")
+    logger.info("⏳ Julio v11.0 Cronos - Esperando sincronización exacta...")
 
     while True:
         try:
-            # SOLUCIÓN AL ICONO AMARILLO: Usamos timezone.utc siempre
+            # Cálculo del tiempo hasta el próximo ciclo de 5 min (al segundo :35)
             ahora = datetime.now(timezone.utc)
-            espera = 300 - (ahora.minute % 5 * 60 + ahora.second) + 35
-            if espera <= 0: espera += 300
+            minutos_restantes = 4 - (ahora.minute % 5)
+            segundos_restantes = 60 - ahora.second + 35
+            total_espera = (minutos_restantes * 60) + segundos_restantes
             
-            logger.info(f"💤 Esperando {espera}s para escaneo limpio.")
-            await asyncio.sleep(espera)
+            # Si el cálculo da más de 300s o menos de 0, ajustar
+            if total_espera > 300: total_espera -= 300
+            if total_espera <= 0: total_espera = 300
 
+            logger.info(f"💤 Próximo rastreo en {total_espera}s (Sincronizado a vela de 5m)")
+            await asyncio.sleep(total_espera)
+
+            # --- INICIO DEL ESCANEO ---
+            hora_senal = datetime.now(timezone.utc).strftime("%H:%M")
+            
             for cat, symbols in ASSETS.items():
                 for sym in symbols:
                     try:
+                        # Descarga de datos
                         if cat == "CRYPTO":
                             r = requests.get(f"https://api.binance.com/api/v3/klines?symbol={sym}&interval=15m&limit=50", timeout=10).json()
                             df = pd.DataFrame(r, columns=["ts","o","h","l","c","v","ct","qv","t","tbb","tbq","i"])
@@ -75,11 +84,14 @@ async def main():
                             df = pd.DataFrame({"o":q["open"],"h":q["high"],"l":q["low"],"c":q["close"]})
                         
                         df = df[["o","h","l","c"]].astype(float).dropna()
-                        res = analizar(df)
+                        res = analizar_mercado(df)
                         
                         if res:
-                            # SOLO envía si la señal es nueva para este activo
-                            if memoria_senales.get(sym) != res['tipo']:
+                            # 🛡️ FILTRO ANTI-SPAM: Símbolo + Minuto actual
+                            # Solo envía si no ha mandado este símbolo en este minuto exacto
+                            id_senal = f"{sym}_{hora_senal}"
+                            
+                            if id_senal not in registro_velas:
                                 msg = (f"🎯 *SEÑAL:* {sym.replace('=X','')}\n"
                                        f"━━━━━━━━━━━━━━━━━━\n"
                                        f"📈 Acción: *{res['tipo']}*\n"
@@ -87,20 +99,25 @@ async def main():
                                        f"🛑 SL: `{res['sl']:.5f}`\n"
                                        f"🎯 TP1: `{res['tp1']:.5f}`\n"
                                        f"🎯 TP2: `{res['tp2']:.5f}`\n"
-                                       f"━━━━━━━━━━━━━━━━━━")
+                                       f"━━━━━━━━━━━━━━━━━━\n"
+                                       f"⏰ Hora: `{hora_senal} UTC`")
+                                
                                 await bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
-                                memoria_senales[sym] = res['tipo']
-                                await asyncio.sleep(2)
-                        else:
-                            # Si ya no hay señal, reseteamos la memoria para ese activo
-                            memoria_senales[sym] = None
-
-                    except Exception as e:
-                        continue
+                                registro_velas[id_senal] = True
+                                logger.info(f"✅ Señal enviada: {sym}")
+                                await asyncio.sleep(2) # Respiro para el servidor
+                                
+                    except Exception: continue
             
-            logger.info("✅ Escaneo terminado. Todo en orden.")
+            # Limpiar memoria de señales viejas para no saturar el bot
+            if len(registro_velas) > 50: registro_velas.clear()
+            
+            logger.info("🔚 Ciclo de escaneo completado.")
+            await asyncio.sleep(10) # Pausa mínima antes de recalcular siguiente ciclo
+
         except Exception as e:
-            await asyncio.sleep(10)
+            logger.error(f"⚠️ Error general: {e}")
+            await asyncio.sleep(20)
 
 if __name__ == "__main__":
     asyncio.run(main())
