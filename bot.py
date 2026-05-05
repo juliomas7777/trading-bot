@@ -5,7 +5,7 @@ import asyncio
 import pandas as pd
 import numpy as np
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from telegram import Bot
 
 # ═══════════════════════════════════════════════════════
@@ -13,12 +13,12 @@ from telegram import Bot
 # ═══════════════════════════════════════════════════════
 TELEGRAM_TOKEN  = "8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y"
 CHAT_ID         = "541470482"
-TOLERANCE      = 0.06 
+TOLERANCE       = 0.06 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── LISTA DE ACTIVOS ──
+# ── ACTIVOS ──
 CRYPTO_ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT", "LTCUSDT", "LINKUSDT", "ZECUSDT", "NEOUSDT", "MANAUSDT"]
 FOREX_PAIRS   = ["AUDUSD=X", "NZDUSD=X", "GBPUSD=X", "EURUSD=X", "USDJPY=X", "USDCHF=X", "USDCAD=X"]
 OTHER_ASSETS  = ["SPY", "ES=F", "GC=F", "NVDA"]
@@ -28,7 +28,7 @@ HARMONIC_PATTERNS = {
     "Crab": {"XAB": (0.382, 0.618), "ABC": (0.382, 0.886), "BCD": (2.240, 3.618), "XAD": (1.618, 1.618), "emoji": "🦀"},
     "Shark": {"XAB": (0.382, 0.618), "ABC": (1.128, 1.618), "BCD": (1.618, 2.236), "XAD": (0.886, 1.128), "emoji": "🦈"},
     "Gartley": {"XAB": (0.618, 0.618), "ABC": (0.382, 0.886), "BCD": (1.272, 1.618), "XAD": (0.786, 0.786), "emoji": "🎯"},
-    "Bat": {"XAB": (0.382, 0.500), "ABC": (0.382, 0.886), "BCD": (1.618, 2.618), "XAD": (0.886, 0.886), "emoji": "BAT"},
+    "Bat": {"XAB": (0.382, 0.500), "ABC": (0.382, 0.886), "BCD": (1.618, 2.618), "XAD": (0.886, 0.886), "emoji": "🦇"},
     "Cypher": {"XAB": (0.382, 0.618), "ABC": (1.272, 1.414), "BCD": (0.786, 0.786), "XAD": (0.786, 0.786), "emoji": "⚡"}
 }
 
@@ -78,27 +78,27 @@ def check_pat(pts, name):
             pat["BCD"][0]*(1-t) <= r[2] <= pat["BCD"][1]*(1+t) and pat["XAD"][0]*(1-t) <= r[3] <= pat["XAD"][1]*(1+t))
 
 # ═══════════════════════════════════════════════════════
-#   🚀  NÚCLEO DE EJECUCIÓN
+#   🚀  SISTEMA FRANCOTIRADOR
 # ═══════════════════════════════════════════════════════
 
 async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("🚀 Bot Julio v4.0 Online - Sincronizado")
+    logger.info("🚀 Bot Julio v4.1 Elite Online")
 
     while True:
-        # 1. Esperar hasta el segundo :35 del próximo minuto múltiplo de 5
-        now = datetime.utcnow()
+        # --- Cálculo de Sincronización ---
+        now = datetime.now(timezone.utc)
         next_m = (now.minute // 5 + 1) * 5
         target = now.replace(minute=0, second=35, microsecond=0) + timedelta(minutes=next_m)
         
         if target <= now: target += timedelta(minutes=5)
         
         wait = (target - now).total_seconds()
-        logger.info(f"⏱️ Esperando {int(wait)}s hasta {target.strftime('%H:%M:%S')} UTC")
+        logger.info(f"⏱️ Sincronizado. Esperando {int(wait)}s hasta {target.strftime('%H:%M:%S')} UTC")
         await asyncio.sleep(wait)
 
-        # 2. Iniciar escaneo rápido
-        logger.info("🔎 Escaneando mercado...")
+        # --- Escaneo de Mercado ---
+        logger.info("🔎 Escaneando mercado para el cierre de vela...")
         for tf in ["5m", "15m", "1h"]:
             for assets, is_crypto in [(CRYPTO_ASSETS, True), (FOREX_PAIRS, False), (OTHER_ASSETS, False)]:
                 for sym in assets:
@@ -108,22 +108,24 @@ async def main():
                         if rsi <= 30 or rsi >= 70:
                             pivots = get_pivots(df)
                             if len(pivots) >= 5:
-                                for name, data in HARMONIC_PATTERNS.items():
+                                for name, pat_data in HARMONIC_PATTERNS.items():
                                     if check_pat(pivots[-5:], name):
                                         is_buy = pivots[-1]["t"] == "L"
-                                        order = "**MARKET**" if (rsi < 25 or rsi > 75) else "**LIMIT**"
-                                        prob = "90%" if (is_buy and trend == "BULL") or (not is_buy and trend == "BEAR") else "65%"
+                                        order_label = "**MARKET**" if (rsi < 25 or rsi > 75) else "**LIMIT**"
+                                        color_label = "COMPRA 🟢" if is_buy else "VENTA 🔴"
                                         
-                                        msg = (f"{data['emoji']} *{name}* | {sym.replace('=X','')}\n"
+                                        msg = (f"{pat_data['emoji']} *{name}* | {sym.replace('=X','')}\n"
                                                f"━━━━━━━━━━━━━━━━━━\n"
-                                               f"📈 Acción: {'COMPRA 🟢' if is_buy else 'VENTA 🔴'} {order}\n"
-                                               f"🕒 TF: *{tf}* | RSI: *{rsi}*\n"
-                                               f"🎯 Probabilidad: *{prob}*\n"
-                                               f"💰 Precio: *{df['c'].iloc[-1]:.5f}*\n"
+                                               f"📈 Acción: {color_label} {order_label}\n"
+                                               f"🕒 Temporalidad: *{tf}*\n"
+                                               f"📊 RSI: *{rsi}* | TF: *{tf}*\n"
+                                               f"💰 Precio actual: *{df['c'].iloc[-1]:.5f}*\n"
                                                f"━━━━━━━━━━━━━━━━━━")
-                                        try: await bot.send_message(CHAT_ID, msg, parse_mode="Markdown"); await asyncio.sleep(1)
+                                        try: 
+                                            await bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+                                            await asyncio.sleep(1)
                                         except: pass
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.05)
 
 if __name__ == "__main__":
     asyncio.run(main())
