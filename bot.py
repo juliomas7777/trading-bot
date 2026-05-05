@@ -15,10 +15,10 @@ TELEGRAM_TOKEN  = "8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y"
 CHAT_ID         = "541470482"
 TOLERANCE       = 0.06 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ── LISTA DE ACTIVOS ──
+# ── ACTIVOS ──
 CRYPTO_ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT", "LTCUSDT", "LINKUSDT", "ZECUSDT", "NEOUSDT", "MANAUSDT"]
 FOREX_PAIRS   = ["AUDUSD=X", "NZDUSD=X", "GBPUSD=X", "EURUSD=X", "USDJPY=X", "USDCHF=X", "USDCAD=X"]
 OTHER_ASSETS  = ["SPY", "ES=F", "GC=F", "NVDA"]
@@ -33,7 +33,7 @@ HARMONIC_PATTERNS = {
 }
 
 # ═══════════════════════════════════════════════════════
-#   📊  LÓGICA TÉCNICA REFORZADA
+#   📊  LÓGICA TÉCNICA
 # ═══════════════════════════════════════════════════════
 
 def fetch_data(symbol, tf, is_crypto):
@@ -41,6 +41,7 @@ def fetch_data(symbol, tf, is_crypto):
         if is_crypto:
             url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={tf}&limit=100"
             r = requests.get(url, timeout=12).json()
+            if not r or not isinstance(r, list): return None
             df = pd.DataFrame(r, columns=["ts","o","h","l","c","v","ct","qv","t","tbb","tbq","i"])
         else:
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={tf}&range=5d"
@@ -82,16 +83,16 @@ def check_pat(pts, name):
             pat["BCD"][0]*(1-t) <= r[2] <= pat["BCD"][1]*(1+t) and pat["XAD"][0]*(1-t) <= r[3] <= pat["XAD"][1]*(1+t))
 
 # ═══════════════════════════════════════════════════════
-#   🚀  NÚCLEO DE TIEMPO FRANCOTIRADOR
+#   🚀  SISTEMA DE EJECUCIÓN INMORTAL
 # ═══════════════════════════════════════════════════════
 
 async def run_bot():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("🚀 Bot Julio v6.1 Elite Online")
+    logger.info("🚀 Bot Julio v6.2 Elite Online - Sistema Iniciado")
 
     while True:
         try:
-            # Sincronización exacta al segundo :35
+            # Sincronización precisa al segundo :35
             now = datetime.now(timezone.utc)
             minutes_to_next = 5 - (now.minute % 5)
             target = now.replace(second=35, microsecond=0) + timedelta(minutes=minutes_to_next)
@@ -103,8 +104,8 @@ async def run_bot():
             logger.info(f"💤 Sincronizado. Próximo escaneo en {int(wait_time)}s ({target.strftime('%H:%M:%S')} UTC)")
             await asyncio.sleep(wait_time)
 
-            # --- INICIO DEL ESCANEO ---
-            logger.info("🔎 Escaneando mercado...")
+            # --- ESCANEO DE MERCADO ---
+            logger.info("🔎 Iniciando rastreo de señales...")
             for tf in ["5m", "15m", "1h"]:
                 for assets, is_crypto in [(CRYPTO_ASSETS, True), (FOREX_PAIRS, False), (OTHER_ASSETS, False)]:
                     for sym in assets:
@@ -128,10 +129,12 @@ async def run_bot():
                                                 await bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
                                                 await asyncio.sleep(1)
                                             except: pass
-                        await asyncio.sleep(0.05)
+                        # Pequeño respiro para no saturar la CPU
+                        await asyncio.sleep(0.1)
+            logger.info("✅ Ciclo de escaneo completado.")
         except Exception as e:
-            logger.error(f"❌ Error en ciclo: {e}")
-            await asyncio.sleep(10)
+            logger.error(f"❌ Error crítico detectado: {e}")
+            await asyncio.sleep(15)
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
