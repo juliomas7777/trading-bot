@@ -18,7 +18,7 @@ TOLERANCE       = 0.06
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── LISTA DE ACTIVOS ──
+# ── ACTIVOS ──
 CRYPTO_ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT", "LTCUSDT", "LINKUSDT", "ZECUSDT", "NEOUSDT", "MANAUSDT"]
 FOREX_PAIRS   = ["AUDUSD=X", "NZDUSD=X", "GBPUSD=X", "EURUSD=X", "USDJPY=X", "USDCHF=X", "USDCAD=X"]
 OTHER_ASSETS  = ["SPY", "ES=F", "GC=F", "NVDA"]
@@ -33,7 +33,7 @@ HARMONIC_PATTERNS = {
 }
 
 # ═══════════════════════════════════════════════════════
-#   📊  LÓGICA TÉCNICA REFORZADA
+#   📊  LÓGICA TÉCNICA
 # ═══════════════════════════════════════════════════════
 
 def fetch_data(symbol, tf, is_crypto):
@@ -48,18 +48,15 @@ def fetch_data(symbol, tf, is_crypto):
             q = r["chart"]["result"][0]["indicators"]["quote"][0]
             df = pd.DataFrame({"o":q["open"],"h":q["high"],"l":q["low"],"c":q["close"]})
         return df[["o","h","l","c"]].astype(float).dropna()
-    except Exception as e:
-        logger.warning(f"⚠️ Error en {symbol}: {e}")
+    except:
         return None
 
 def analyze(series):
     try:
         delta = series.diff()
         g = (delta.where(delta > 0, 0)).rolling(14).mean()
-        l = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        # Manejo de división por cero
-        l_replaced = l.replace(0, 0.00001)
-        rsi = 100 - (100 / (1 + (g / l_replaced))).iloc[-1]
+        l = (-delta.where(delta < 0, 0)).rolling(14).mean().replace(0, 0.00001)
+        rsi = 100 - (100 / (1 + (g / l))).iloc[-1]
         ema = series.ewm(span=50).mean().iloc[-1]
         return round(rsi, 2), ("BULL" if series.iloc[-1] > ema else "BEAR")
     except: return 50.0, "NEUTRAL"
@@ -86,16 +83,16 @@ def check_pat(pts, name):
             pat["BCD"][0]*(1-t) <= r[2] <= pat["BCD"][1]*(1+t) and pat["XAD"][0]*(1-t) <= r[3] <= pat["XAD"][1]*(1+t))
 
 # ═══════════════════════════════════════════════════════
-#   🚀  NÚCLEO DE EJECUCIÓN (SIN AVISOS DE DEPRECACIÓN)
+#   🚀  SISTEMA DE TIEMPO EXACTO
 # ═══════════════════════════════════════════════════════
 
 async def run_bot():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("🚀 Bot Julio v5.5 Elite Online")
+    logger.info("🚀 Bot Julio v6.0 Elite Online")
 
     while True:
         try:
-            # Sincronización perfecta al segundo :35
+            # Sincronización al segundo :35 del próximo múltiplo de 5
             now = datetime.now(timezone.utc)
             minutes_to_next = 5 - (now.minute % 5)
             target = now.replace(second=35, microsecond=0) + timedelta(minutes=minutes_to_next)
@@ -107,8 +104,7 @@ async def run_bot():
             logger.info(f"💤 Sincronizado. Próximo escaneo en {int(wait)}s ({target.strftime('%H:%M:%S')} UTC)")
             await asyncio.sleep(wait)
 
-            # Escaneo
-            logger.info("🔎 Iniciando rastreo de señales...")
+            # --- ESCANEO ---
             for tf in ["5m", "15m", "1h"]:
                 for assets, is_crypto in [(CRYPTO_ASSETS, True), (FOREX_PAIRS, False), (OTHER_ASSETS, False)]:
                     for sym in assets:
@@ -133,8 +129,8 @@ async def run_bot():
                                                 await asyncio.sleep(1)
                                             except: pass
                         await asyncio.sleep(0.05)
-        except Exception as global_e:
-            logger.error(f"❌ Error crítico en el ciclo: {global_e}")
+        except Exception as e:
+            logger.error(f"❌ Error en ciclo: {e}")
             await asyncio.sleep(10)
 
 if __name__ == "__main__":
