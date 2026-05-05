@@ -1,119 +1,132 @@
-import asyncio
 import logging
+import asyncio
 import pandas as pd
 import numpy as np
-import pandas_ta as ta
-import ccxt.async_support as ccxt
-from datetime import datetime
+import requests
+from datetime import datetime, timedelta, timezone
 from telegram import Bot
-from telegram.constants import ParseMode
 
-# =============================================
-#  CREDENCIALES ACTIVADAS
-# =============================================
-TELEGRAM_TOKEN = "7336183907:AAEShYhWn4Y1f56_0h2pC8YwL6fX0X3vR-I"
-TELEGRAM_CHAT_ID = "-1002235962369"
-EXCHANGE_ID = "binance" 
+# ═══════════════════════════════════════════════════════
+#           ⚙️  CONFIGURACIÓN FINAL (VALIDADA)
+# ═══════════════════════════════════════════════════════
+TELEGRAM_TOKEN  = "8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y"
+CHAT_ID         = "541470482"
 
-# Lista maestra de activos (Cripto, Forex, Índices)
-ALL_SYMBOLS = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "BNB/USDT",
-    "EUR/USDC", "GBP/USDC", "AAPL/USDT", "TSLA/USDT"
-]
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Parámetros técnicos
-RSI_PERIOD = 14
-BB_PERIOD = 20
-BB_STD = 2.0
-MIN_GAP_PERCENT = 0.3
+CRYPTO_ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "ADAUSDT", "XRPUSDT"]
+FOREX_PAIRS   = ["EURUSD=X", "GBPUSD=X", "USDJPY=X"]
+OTHER_ASSETS  = ["SPY", "NVDA", "GC=F"]
 
-# =============================================
-#  LOGGING Y SISTEMA DE MENSAJES
-# =============================================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-log = logging.getLogger(__name__)
-bot = Bot(token=TELEGRAM_TOKEN)
+# ═══════════════════════════════════════════════════════
+#   🧠 MOTOR DE ESTRATEGIAS (4 SISTEMAS INDEPENDIENTES)
+# ═══════════════════════════════════════════════════════
 
-async def send_telegram_signal(msg):
-    try:
-        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode=ParseMode.HTML)
-        log.info("Señal enviada a Telegram.")
-    except Exception as e:
-        log.error(f"Error en Telegram: {e}")
-
-# =============================================
-#  MOTOR DE ANÁLISIS
-# =============================================
-async def fetch_data(symbol, tf):
-    exchange = getattr(ccxt, EXCHANGE_ID)({'enableRateLimit': True})
-    try:
-        ohlcv = await exchange.fetch_ohlcv(symbol, tf, limit=100)
-        df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-        return df.astype(float)
-    except Exception as e:
-        log.error(f"Error datos {symbol} [{tf}]: {e}")
-        return None
-    finally:
-        await exchange.close()
-
-# 1. MEAN REVERSION
-async def check_mean_reversion(symbol, tf, df):
-    df['rsi'] = ta.rsi(df['close'], length=RSI_PERIOD)
-    bb = ta.bbands(df['close'], length=BB_PERIOD, std=BB_STD)
-    if bb is None: return
-    last = df.iloc[-1]
-    upper = bb.iloc[-1, 2] # BBU
-    lower = bb.iloc[-1, 0] # BBL
-
-    if last['rsi'] > 70 and last['close'] >= upper:
-        await send_telegram_signal(f"🔄 <b>MEAN REVERSION</b>\n📌 {symbol} [{tf}]\n🎯 VENTA 📉\n💰 Precio: {last['close']}")
-    elif last['rsi'] < 30 and last['close'] <= lower:
-        await send_telegram_signal(f"🔄 <b>MEAN REVERSION</b>\n📌 {symbol} [{tf}]\n🎯 COMPRA 📈\n💰 Precio: {last['close']}")
-
-# 2. GAP FILL
-async def check_gap_fill(symbol, tf, df):
-    if len(df) < 2: return
-    prev_close = df.iloc[-2]['close']
-    curr_open = df.iloc[-1]['open']
-    gap = ((curr_open - prev_close) / prev_close) * 100
-    if abs(gap) >= MIN_GAP_PERCENT:
-        await send_telegram_signal(f"⚡ <b>GAP FILL</b>\n📌 {symbol} [{tf}]\n📈 Gap: {gap:.2f}%\n🎯 {'VENTA 📉' if gap > 0 else 'COMPRA 📈'}")
-
-# 3. SMC / ORDER BLOCK
-async def check_smc_ob(symbol, tf, df):
-    high_50 = df['high'].tail(50).max()
-    low_50 = df['low'].tail(50).min()
-    price = df['close'].iloc[-1]
-    if price >= high_50 * 0.998:
-        await send_telegram_signal(f"🧠 <b>SMC / ORDER BLOCK</b>\n📌 {symbol} [{tf}]\n🔴 Resistencia Detectada\n🎯 Acción: VENTA")
-    elif price <= low_50 * 1.002:
-        await send_telegram_signal(f"🧠 <b>SMC / ORDER BLOCK</b>\n📌 {symbol} [{tf}]\n🟢 Soporte Detectado\n🎯 Acción: COMPRA")
-
-# 4. ARMÓNICOS
-async def check_harmonics(symbol, tf, df):
-    rsi = ta.rsi(df['close'], length=14).iloc[-1]
-    if rsi > 80 or rsi < 20:
-        await send_telegram_signal(f"🦋 <b>ARMÓNICOS</b>\n📌 {symbol} [{tf}]\n🎯 Reversión en PRZ detectada ({'VENTA' if rsi > 80 else 'COMPRA'})")
-
-# =============================================
-#  SCANNERS MULTI-TEMPORALES (Incluye 5m)
-# =============================================
-async def scanner():
-    log.info("🤖 Bot Julio Inmortal v7.0 INICIADO")
-    await send_telegram_signal("🚀 <b>Sistema Online</b>\nEscaneando: 5m, 15m, 1h, 4h\nActivos: Cripto/Forex/Índices")
+def get_indicators(df):
+    # RSI
+    delta = df['c'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean().replace(0, 0.0001)
+    df['rsi'] = 100 - (100 / (1 + (gain / loss)))
     
-    tfs = ["5m", "15m", "1h", "4h"]
+    # Medias Móviles (Cruce SMA)
+    df['sma_fast'] = df['c'].rolling(window=9).mean()
+    df['sma_slow'] = df['c'].rolling(window=21).mean()
+    
+    # MACD
+    ema12 = df['c'].ewm(span=12, adjust=False).mean()
+    ema26 = df['c'].ewm(span=26, adjust=False).mean()
+    df['macd'] = ema12 - ema26
+    df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    
+    # Bandas de Bollinger
+    df['ma20'] = df['c'].rolling(window=20).mean()
+    df['std'] = df['c'].rolling(window=20).std()
+    df['upper'] = df['ma20'] + (df['std'] * 2)
+    df['lower'] = df['ma20'] - (df['std'] * 2)
+    
+    return df
+
+def check_strategies(df):
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    price = last['c']
+    
+    # 1. Estrategia RSI (Sobreventa/Sobrecompra)
+    if last['rsi'] < 30: return "COMPRA (RSI)", "MARKET", price * 0.985, price * 1.02, price * 1.04
+    if last['rsi'] > 70: return "VENTA (RSI)", "MARKET", price * 1.015, price * 0.98, price * 0.96
+    
+    # 2. Cruce de Medias SMA
+    if prev['sma_fast'] < prev['sma_slow'] and last['sma_fast'] > last['sma_slow']:
+        return "COMPRA (SMA Cross)", "LIMIT", price * 0.99, price * 1.03, price * 1.06
+    
+    # 3. MACD Golden Cross
+    if prev['macd'] < prev['signal'] and last['macd'] > last['signal']:
+        return "COMPRA (MACD)", "MARKET", price * 0.99, price * 1.02, price * 1.05
+        
+    # 4. Bollinger Rebound
+    if last['c'] < last['lower']:
+        return "COMPRA (Bollinger)", "LIMIT", price * 0.98, price * 1.02, price * 1.04
+
+    return None, None, None, None, None
+
+# ═══════════════════════════════════════════════════════
+#   📡 CONEXIÓN Y SINCRONIZACIÓN (ESTILO INMORTAL)
+# ═══════════════════════════════════════════════════════
+
+def fetch_data(symbol, tf, is_crypto):
+    try:
+        if is_crypto:
+            url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={tf}&limit=100"
+            r = requests.get(url, timeout=12).json()
+            df = pd.DataFrame(r, columns=["ts","o","h","l","c","v","ct","qv","t","tbb","tbq","i"])
+        else:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={tf}&range=5d"
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
+            q = r["chart"]["result"][0]["indicators"]["quote"][0]
+            df = pd.DataFrame({"o":q["open"],"h":q["high"],"l":q["low"],"c":q["close"]})
+        return df[["o","h","l","c"]].astype(float).dropna()
+    except: return None
+
+async def run_bot():
+    bot = Bot(token=TELEGRAM_TOKEN)
+    logger.info("🚀 Julio v7.0 Maestro Online - 4 Estrategias Activas")
+
     while True:
-        for tf in tfs:
-            for symbol in ALL_SYMBOLS:
-                df = await fetch_data(symbol, tf)
-                if df is None or df.empty: continue
-                await check_mean_reversion(symbol, tf, df)
-                await check_gap_fill(symbol, tf, df)
-                await check_smc_ob(symbol, tf, df)
-                await check_harmonics(symbol, tf, df)
-                await asyncio.sleep(0.5)
-        await asyncio.sleep(300) # Ciclo cada 5 min
+        try:
+            now = datetime.now(timezone.utc)
+            minutes_to_next = 5 - (now.minute % 5)
+            target = now.replace(second=35, microsecond=0) + timedelta(minutes=minutes_to_next)
+            if target <= now: target += timedelta(minutes=5)
+            
+            wait_time = (target - now).total_seconds()
+            logger.info(f"💤 Sincronizado. Próximo escaneo en {int(wait_time)}s")
+            await asyncio.sleep(wait_time + 2) # Buffer de cierre
+
+            for tf in ["5m", "15m", "1h"]:
+                for assets, is_crypto in [(CRYPTO_ASSETS, True), (FOREX_PAIRS, False), (OTHER_ASSETS, False)]:
+                    for sym in assets:
+                        df = fetch_data(sym, tf, is_crypto)
+                        if df is not None and len(df) > 30:
+                            df = get_indicators(df)
+                            signal, o_type, sl, tp1, tp2 = check_strategies(df)
+                            
+                            if signal:
+                                msg = (f"🤖 *JULIO v7.0:* {sym.replace('=X','')}\n"
+                                       f"━━━━━━━━━━━━━━━━━━\n"
+                                       f"📊 Estrategia: *{signal}*\n"
+                                       f"🕒 TF: *{tf}* | Tipo: *{o_type}*\n"
+                                       f"💰 Precio: *{df['c'].iloc[-1]:.5f}*\n"
+                                       f"🛑 Stop Loss: *{sl:.5f}*\n"
+                                       f"🎯 TP1: *{tp1:.5f}* | TP2: *{tp2:.5f}*\n"
+                                       f"━━━━━━━━━━━━━━━━━━")
+                                await bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+                                await asyncio.sleep(1)
+            logger.info("✅ Ciclo de 4 estrategias completado.")
+        except Exception as e:
+            logger.error(f"❌ Error: {e}")
+            await asyncio.sleep(15)
 
 if __name__ == "__main__":
-    asyncio.run(scanner())
+    asyncio.run(run_bot())
