@@ -2,32 +2,23 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          HARMONIC PATTERN BOT - QUANTFURY SIGNALS PARA TELEGRAM             ║
-║         Patrones: Gartley, Bat, Butterfly, Crab, Shark, Cypher              ║
-║         Temporalidades: 1H, 15MIN, 5MIN  |  RSI + Fibonacci                 ║
+║          HARMONIC PATTERN BOT - QUANTFURY SIGNALS PARA TELEGRAM              ║
+║         Patrones: Gartley, Bat, Butterfly, Crab, Shark, Cypher               ║
+║         Temporalidades: 1H, 15MIN, 5MIN  |  RSI + Fibonacci                  ║
 ║                    @TuBotTelegram  v2.0                                      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
-
-# ═══════════════════════════════════════════════════════
-#  INSTALACIÓN:
-#  pip install -r requirements.txt
-# ═══════════════════════════════════════════════════════
 
 import os
 import time
 import math
 import logging
-import schedule
-import threading
+import asyncio
 import pandas as pd
 import numpy as np
 import requests
 from datetime import datetime
 from telegram import Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
-from telegram import Update
-import asyncio
 
 # ═══════════════════════════════════════════════════════
 #           ⚙️  CONFIGURACIÓN PRINCIPAL
@@ -52,7 +43,6 @@ logger = logging.getLogger(__name__)
 #   📋  ACTIVOS QUANTFURY (2000+ activos cubiertos)
 # ═══════════════════════════════════════════════════════
 
-# ── CRYPTO (Patrones: Butterfly, Crab, Shark) ──
 CRYPTO_ASSETS = [
     "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
     "ADAUSDT","DOGEUSDT","AVAXUSDT","DOTUSDT","MATICUSDT",
@@ -66,7 +56,6 @@ CRYPTO_ASSETS = [
     "SEIUSDT","TIAUSDT","JUPUSDT","WIFUSDT","BONKUSDT",
 ]
 
-# ── ACCIONES USA (Patrones: Gartley, Bat, Cypher, Butterfly) ──
 STOCKS_US = [
     "AAPL","MSFT","GOOGL","AMZN","TSLA","NVDA","META","NFLX",
     "AMD","INTC","BABA","SHOP","SQ","PYPL","UBER","LYFT",
@@ -79,7 +68,6 @@ STOCKS_US = [
     "MMM","LMT","RTX","XOM","CVX","COP","SLB","HAL",
 ]
 
-# ── ETFs (Patrones: Gartley, Bat, Cypher, Butterfly) ──
 ETFS = [
     "SPY","QQQ","IWM","DIA","VOO","VTI","VEA","VWO",
     "GLD","SLV","USO","UNG","TLT","IEF","SHY","BND",
@@ -88,7 +76,6 @@ ETFS = [
     "SOXL","TQQQ","SQQQ","FXI","KWEB","EEM","EWJ","EWZ",
 ]
 
-# ── FUTUROS (Patrones: Gartley, Bat, Cypher, Butterfly) ──
 FUTURES = [
     "ES=F","NQ=F","YM=F","RTY=F","NKD=F",
     "GC=F","SI=F","HG=F","PL=F","PA=F",
@@ -97,7 +84,6 @@ FUTURES = [
     "BTC=F","ETH=F",
 ]
 
-# ── FOREX / DIVISAS (Patrones: Gartley, Bat, Cypher, Butterfly) ──
 FOREX_PAIRS = [
     "EURUSD=X","GBPUSD=X","JPY=X","CHFUSD=X","AUDUSD=X",
     "NZDUSD=X","CADUSD=X","EURGBP=X","EURJPY=X","GBPJPY=X",
@@ -112,7 +98,6 @@ FOREX_PAIRS = [
 # ═══════════════════════════════════════════════════════
 
 HARMONIC_PATTERNS = {
-    # ─── CRYPTO ───────────────────────────────────────
     "Butterfly": {
         "XAB": (0.786, 0.786),
         "ABC": (0.382, 0.886),
@@ -137,7 +122,6 @@ HARMONIC_PATTERNS = {
         "assets": ["CRYPTO"],
         "emoji": "shark"
     },
-    # ─── STOCKS / ETF / FUTUROS / FOREX ───────────────
     "Gartley": {
         "XAB": (0.618, 0.618),
         "ABC": (0.382, 0.886),
@@ -176,7 +160,6 @@ TIMEFRAME_LABELS = {
 # ═══════════════════════════════════════════════════════
 
 def fetch_ohlcv_binance(symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
-    """Datos OHLCV desde Binance (sin API key requerida)."""
     try:
         url    = "https://api.binance.com/api/v3/klines"
         params = {"symbol": symbol, "interval": interval, "limit": limit}
@@ -193,12 +176,9 @@ def fetch_ohlcv_binance(symbol: str, interval: str, limit: int = 200) -> pd.Data
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df[["timestamp","open","high","low","close","volume"]]
     except Exception as e:
-        logger.error(f"Binance error {symbol} {interval}: {e}")
         return pd.DataFrame()
 
-
 def fetch_ohlcv_yahoo(symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
-    """Datos OHLCV desde Yahoo Finance (sin API key)."""
     try:
         period_map = {"5m": "5d", "15m": "15d", "1h": "60d"}
         period  = period_map.get(interval, "60d")
@@ -223,9 +203,7 @@ def fetch_ohlcv_yahoo(symbol: str, interval: str, limit: int = 200) -> pd.DataFr
         }).dropna()
         return df.tail(limit).reset_index(drop=True)
     except Exception as e:
-        logger.error(f"Yahoo error {symbol} {interval}: {e}")
         return pd.DataFrame()
-
 
 # ═══════════════════════════════════════════════════════
 #   📈  CÁLCULO RSI
@@ -243,44 +221,36 @@ def calculate_rsi(closes: pd.Series, period: int = 14) -> float:
     rsi      = 100 - (100 / (1 + rs))
     return round(float(rsi.iloc[-1]), 2)
 
-
 # ═══════════════════════════════════════════════════════
-#   🔍  DETECCIÓN DE PIVOTS (ZIG-ZAG)
+#   🔍  DETECCIÓN DE PIVOTS Y FIBONACCI
 # ═══════════════════════════════════════════════════════
 
 def find_pivots(df: pd.DataFrame, order: int = 5) -> list:
-    """Encuentra puntos de giro para construir estructuras XABCD."""
     pivots = []
     highs  = df["high"].values
     lows   = df["low"].values
     n      = len(df)
 
     for i in range(order, n - order):
-        is_ph = all(highs[i] >= highs[i-j] for j in range(1, order+1)) and                 all(highs[i] >= highs[i+j] for j in range(1, order+1))
-        is_pl = all(lows[i]  <= lows[i-j]  for j in range(1, order+1)) and                 all(lows[i]  <= lows[i+j]  for j in range(1, order+1))
+        is_ph = all(highs[i] >= highs[i-j] for j in range(1, order+1)) and all(highs[i] >= highs[i+j] for j in range(1, order+1))
+        is_pl = all(lows[i] <= lows[i-j] for j in range(1, order+1)) and all(lows[i] <= lows[i+j] for j in range(1, order+1))
+        
         if is_ph:
             pivots.append({"idx": i, "price": highs[i], "type": "H"})
         elif is_pl:
             pivots.append({"idx": i, "price": lows[i],  "type": "L"})
 
-    # Eliminar pivots consecutivos del mismo tipo (mantener extremo)
     filtered = []
     for p in pivots:
         if filtered and filtered[-1]["type"] == p["type"]:
-            if (p["type"] == "H" and p["price"] > filtered[-1]["price"]) or                (p["type"] == "L" and p["price"] < filtered[-1]["price"]):
+            if (p["type"] == "H" and p["price"] > filtered[-1]["price"]) or (p["type"] == "L" and p["price"] < filtered[-1]["price"]):
                 filtered[-1] = p
         else:
             filtered.append(p)
     return filtered
 
-
-# ═══════════════════════════════════════════════════════
-#   📐  VERIFICACIÓN DE RATIOS FIBONACCI
-# ═══════════════════════════════════════════════════════
-
 def in_range(actual: float, lo: float, hi: float, tol: float) -> bool:
     return lo * (1 - tol) <= actual <= hi * (1 + tol)
-
 
 def check_pattern(X, A, B, C, D, pat_name: str) -> bool:
     pat = HARMONIC_PATTERNS.get(pat_name)
@@ -300,11 +270,6 @@ def check_pattern(X, A, B, C, D, pat_name: str) -> bool:
         in_range(AD/XA, *pat["XAD"], TOLERANCE)
     )
 
-
-# ═══════════════════════════════════════════════════════
-#   🎯  MOTOR DE DETECCIÓN DE PATRONES
-# ═══════════════════════════════════════════════════════
-
 def detect_harmonics(df: pd.DataFrame, asset_type: str, symbol: str) -> list:
     signals = []
     if df is None or len(df) < 50:
@@ -314,16 +279,14 @@ def detect_harmonics(df: pd.DataFrame, asset_type: str, symbol: str) -> list:
     if len(pivots) < 5:
         return signals
 
-    applicable = {
-        n: p for n, p in HARMONIC_PATTERNS.items()
-        if asset_type in p["assets"]
-    }
+    applicable = {n: p for n, p in HARMONIC_PATTERNS.items() if asset_type in p["assets"]}
 
     for i in range(len(pivots) - 4):
         pts   = pivots[i:i+5]
         types = [p["type"] for p in pts]
         is_bull = types == ["L","H","L","H","L"]
         is_bear = types == ["H","L","H","L","H"]
+        
         if not is_bull and not is_bear:
             continue
 
@@ -356,23 +319,18 @@ def detect_harmonics(df: pd.DataFrame, asset_type: str, symbol: str) -> list:
                     "order_type": order_type,
                     "symbol":     symbol,
                     "asset_type": asset_type,
-                    "X": X, "A": A, "B": B, "C": C, "D": D,
                 })
     return signals
-
 
 # ═══════════════════════════════════════════════════════
 #   📩  FORMATO DEL MENSAJE TELEGRAM
 # ═══════════════════════════════════════════════════════
 
 EMOJI_MAP = {
-    "butterfly": "🦋",
-    "crab":      "🦀",
-    "shark":     "🦈",
-    "target":    "🎯",
-    "bat":       "🦇",
-    "lightning": "⚡",
+    "butterfly": "🦋", "crab": "🦀", "shark": "🦈",
+    "target": "🎯", "bat": "🦇", "lightning": "⚡",
 }
+
 def format_message(sig: dict, rsi: float, tf: str) -> str:
     dot = "🟢" if sig["is_bull"] else "🔴"
     dir_t = "📈 ALCISTA" if sig["is_bull"] else "📉 BAJISTA"
@@ -381,13 +339,13 @@ def format_message(sig: dict, rsi: float, tf: str) -> str:
 
     if rsi >= RSI_OVERBOUGHT:
         rsi_s = f"🔥 SOBRECOMPRADO ({rsi})"
-        rsi_v = "⚠️ RSI sobrecompra - señal alcista con menor confianza"
+        rsi_v = "⚠️ RSI indica sobrecompra - Precaución."
     elif rsi <= RSI_OVERSOLD:
         rsi_s = f"❄️ SOBREVENDIDO ({rsi})"
-        rsi_v = "✅ RSI confirma SOBREVENDIDO - señal FUERTE"
+        rsi_v = "✅ RSI confirma SOBREVENDIDO - Señal fuerte."
     else:
         rsi_s = f"⚖️ Neutral ({rsi})"
-        rsi_v = "🔵 RSI neutral - operar con precaución"
+        rsi_v = "🔵 RSI en zona neutral."
 
     asset_labels = {
         "CRYPTO": "🟠 Criptomoneda", "STOCKS": "🟦 Acción",
@@ -407,6 +365,9 @@ def format_message(sig: dict, rsi: float, tf: str) -> str:
         f"⏱ *Temporalidad:* {tf_lb}\n"
         f"↕️ *Dirección:* {dir_t}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *RSI (14):* {rsi_s}\n"
+        f"💡 {rsi_v}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"📍 *NIVELES DE OPERACIÓN:*\n"
         f"🔵 *Entrada ({sig['order_type']}):* {f.format(sig['entry'])}\n"
         f"🔴 *Stop Loss:* {f.format(sig['sl'])}\n"
@@ -414,46 +375,60 @@ def format_message(sig: dict, rsi: float, tf: str) -> str:
         f"🟢 *TP2 (Fib 0.618):* {f.format(sig['tp2'])}\n"
         f"━━━━━━━━━━━━━━━━━━"
     )
-   async def main():
+
+# ═══════════════════════════════════════════════════════
+#   🚀  MOTOR PRINCIPAL DE EJECUCIÓN
+# ═══════════════════════════════════════════════════════
+
+async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
     logger.info("🚀 Bot iniciado y patrullando el mercado...")
     
+    all_assets = [
+        (CRYPTO_ASSETS, "CRYPTO"),
+        (STOCKS_US, "STOCKS"),
+        (ETFS, "ETF"),
+        (FUTURES, "FUTURES"),
+        (FOREX_PAIRS, "FOREX")
+    ]
+    
     while True:
         try:
-            # Lista de activos
-            all_assets = [
-                (CRYPTO_ASSETS, "CRYPTO"),
-                (STOCKS_US, "STOCKS"),
-                (ETFS, "ETF"),
-                (FUTURES, "FUTURES"),
-                (FOREX_PAIRS, "FOREX")
-            ]
-
-            for asset_list, asset_type in all_assets:
-                for symbol in asset_list:
-                    if asset_type == "CRYPTO":
-                        df = fetch_ohlcv_binance(symbol, "5m")
-                    else:
-                        df = fetch_ohlcv_yahoo(symbol, "5m")
-
-                    if df is None or df.empty:
-                        continue
-
-                    signals = detect_harmonics(df, asset_type, symbol)
-                    
-                    if signals:
-                        rsi = calculate_rsi(df["close"])
-                        for sig in signals:
-                            text = format_message(sig, rsi, "5m")
-                            await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
-                            logger.info(f"✅ Señal enviada: {symbol}")
+            for tf in TIMEFRAMES:
+                logger.info(f"Analizando temporalidad: {tf}...")
+                for asset_list, asset_type in all_assets:
+                    for symbol in asset_list:
+                        try:
+                            if asset_type == "CRYPTO":
+                                df = fetch_ohlcv_binance(symbol, tf)
+                            else:
+                                df = fetch_ohlcv_yahoo(symbol, tf)
+                                
+                            if df is not None and not df.empty:
+                                signals = detect_harmonics(df, asset_type, symbol)
+                                if signals:
+                                    rsi = calculate_rsi(df["close"], RSI_PERIOD)
+                                    for sig in signals:
+                                        msg = format_message(sig, rsi, tf)
+                                        await bot.send_message(
+                                            chat_id=CHAT_ID, 
+                                            text=msg, 
+                                            parse_mode="Markdown"
+                                        )
+                                        logger.info(f"✅ Señal enviada: {symbol} en {tf}")
+                                        await asyncio.sleep(1) # Anti-spam de Telegram
+                                        
+                            await asyncio.sleep(0.5) # Pausa entre cada moneda para no saturar APIs
+                        except Exception as e:
+                            logger.error(f"Error en {symbol} ({tf}): {e}")
+                            continue
             
-            await asyncio.sleep(300) 
+            logger.info(f"🏁 Ciclo de escaneo completado. Durmiendo {SCAN_INTERVAL_MINUTES} minutos...")
+            await asyncio.sleep(SCAN_INTERVAL_MINUTES * 60)
             
-       await asyncio.sleep(300)
         except Exception as e:
-            logger.error(f"Error: {e}")
+            logger.error(f"Error crítico en el bucle principal: {e}")
             await asyncio.sleep(60)
 
-if__name__== "main":
-asyncio.run(main()) 
+if __name__ == "__main__":
+    asyncio.run(main())
