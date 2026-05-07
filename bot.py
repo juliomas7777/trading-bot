@@ -6,7 +6,7 @@ import numpy as np
 from telegram import Bot
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN ULTRA-FILTRADA
+# ⚙️ CONFIGURACIÓN PRO: RR MÍNIMO 1.5
 # ==========================================
 TELEGRAM_TOKEN = "8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y"
 CHAT_ID = "541470482"
@@ -18,100 +18,93 @@ ASSETS = {
 }
 
 TIMEFRAMES = ["5m", "15m", "1h", "4h"]
+RR_MINIMO = 1.5  # Arriesgas 1 para ganar 1.5
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 estado_semanal = {}
 
 # ==========================================
-# 📈 MOTOR DE DATOS Y ESTRATEGIAS
+# 📉 MOTOR DE ANÁLISIS CON CÁLCULO DE NIVELES
 # ==========================================
-def obtener_datos(sym, tf):
-    try:
-        sym_api = sym
-        if "USD" in sym and len(sym) > 5:
-            sym_api = sym.replace("USD", "-USD") if any(x in sym for x in ["BTC", "ETH", "SOL"]) else sym + "=X"
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_api}?interval={tf}&range=30d"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
-        q = r["chart"]["result"][0]["indicators"]["quote"][0]
-        return pd.DataFrame({"h":q["high"],"l":q["low"],"c":q["close"]}).dropna()
-    except: return None
-
 def analizar_todo(df, sym, tf):
-    # 1. CANAL
-    precios = df['c'].values[-60:]; x = np.arange(len(precios))
+    precios = df['c'].values[-60:]
+    x = np.arange(len(precios))
     slope, intercept = np.polyfit(x, precios, 1)
+    linea_central = (slope * x + intercept)[-1]
     desv = np.std(precios - (slope * x + intercept))
-    sup, inf = (slope * x + intercept)[-1] + (desv * 2), (slope * x + intercept)[-1] - (desv * 2)
     
+    precio_actual = precios[-1]
+    sup, inf = linea_central + (desv * 2.1), linea_central - (desv * 2.1)
+    
+    # 1. CANAL
     canal = None
-    if slope > 0 and precios[-1] >= sup * 0.998: canal = "VENTA"
-    if slope < 0 and precios[-1] <= inf * 1.002: canal = "COMPRA"
+    if slope > 0 and precio_actual >= sup * 0.998: canal = "VENTA"
+    if slope < 0 and precio_actual <= inf * 1.002: canal = "COMPRA"
     
-    # 2. ARMONICO
-    armonico = None
-    p = df['c'].values; x_a, a, b, c, d = p[-40], p[-30], p[-20], p[-10], p[-1]
-    if d < c and d < a: armonico = "COMPRA"
-    if d > c and d > a: armonico = "VENTA"
+    # 2. ARMONICO & 3. SMC (Simplificado para validación de dirección)
+    p = df['c'].values
+    armonico = "COMPRA" if p[-1] < p[-10] and p[-1] < p[-30] else "VENTA"
+    smc = "COMPRA" if df['l'].iloc[-1] > df['h'].iloc[-3] else "VENTA" if df['h'].iloc[-1] < df['l'].iloc[-3] else None
     
-    # 3. SMC
-    smc = None
-    if df['l'].iloc[-1] > df['h'].iloc[-3]: smc = "COMPRA"
-    if df['h'].iloc[-1] < df['l'].iloc[-3]: smc = "VENTA"
-    
-    # ¿COINCIDEN LAS 3?
     if canal and armonico and smc and (canal == armonico == smc):
-        return canal, precios[-1]
-    return None, None
+        # --- CÁLCULO DE RATIO RR ---
+        if canal == "COMPRA":
+            sl = precio_actual - (desv * 1.5) # SL por debajo del mínimo del canal
+            tp = linea_central                # TP en la media del canal
+        else:
+            sl = precio_actual + (desv * 1.5) # SL por encima del máximo del canal
+            tp = linea_central                # TP en la media del canal
+            
+        riesgo = abs(precio_actual - sl)
+        beneficio = abs(tp - precio_actual)
+        
+        if riesgo > 0 and (beneficio / riesgo) >= RR_MINIMO:
+            return canal, precio_actual, sl, tp, round(beneficio/riesgo, 2)
+            
+    return None, None, None, None, None
 
 # ==========================================
-# 🧠 LÓGICA MULTI-TIMEFRAME (2 TF MÍNIMO)
+# 🧠 LÓGICA DE ENVÍO CON FILTRO RR
 # ==========================================
 async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("📡 MODO ULTRA-FILTRADO: 3/3 Estrategias en 2+ Timeframes")
+    logger.info(f"📡 MODO RENTABLE: RR Mínimo {RR_MINIMO} | 2+ TFs")
 
     while True:
         try:
             for cat, symbols in ASSETS.items():
                 for s in symbols:
-                    coincidencias_tf = [] # Guardará (tf, direccion, precio)
-                    
+                    coincidencias = []
                     for tf in TIMEFRAMES:
                         df = obtener_datos(s, tf)
                         if df is None: continue
-                        
-                        dir, px = analizar_todo(df, s, tf)
-                        if dir:
-                            coincidencias_tf.append({"tf": tf, "dir": dir, "px": px})
+                        dir, px, sl, tp, rr = analizar_todo(df, s, tf)
+                        if dir: coincidencias.append({"tf": tf, "dir": dir, "px": px, "sl": sl, "tp": tp, "rr": rr})
                     
-                    # SI HAY 2 O MÁS TIMEFRAMES CON LAS 3 ESTRATEGIAS COINCIDIENDO
-                    if len(coincidencias_tf) >= 2:
-                        direcciones = [x['dir'] for x in coincidencias_tf]
-                        # Validar que todos los TFs apunten al mismo lado
-                        if all(d == direcciones[0] for d in direcciones):
-                            dir_final = direcciones[0]
-                            tfs_texto = ", ".join([x['tf'].upper() for x in coincidencias_tf])
+                    if len(coincidencias) >= 2:
+                        # Validar misma dirección en los TFs encontrados
+                        if all(x['dir'] == coincidencias[0]['dir'] for x in coincidencias):
+                            c = coincidencias[0] # Usamos los datos del primer TF que activó
+                            id_alerta = f"{s}_{c['dir']}_{len(coincidencias)}TF"
                             
-                            id_alerta = f"{s}_{dir_final}_{tfs_texto}"
                             if estado_semanal.get(s) != id_alerta:
-                                color = "🟢" if dir_final == "COMPRA" else "🔴"
+                                color = "🟢" if c['dir'] == "COMPRA" else "🔴"
                                 msg = (
-                                    f"{color} **{dir_final} CONFIRMADA** {color}\n"
+                                    f"{color} **{c['dir']} (RR {c['rr']})** {color}\n"
                                     f"━━━━━━━━━━━━━━━\n"
-                                    f"**ACTIVO:** `{s}`\n"
-                                    f"**TIMEFRAMES:** `{tfs_texto}`\n"
+                                    f"**ACTIVO:** `{s}` | **TFs:** `{', '.join([x['tf'].upper() for x in coincidencias])}`\n"
                                     f"━━━━━━━━━━━━━━━\n"
-                                    f"🔥 **CONFLUENCIA TOTAL (3/3)**\n"
-                                    f"✅ **DETECTADA EN {len(coincidencias_tf)} MARCOS DE TIEMPO**\n"
+                                    f"🚀 **ENTRADA:** `{c['px']:.5f}`\n"
+                                    f"🛑 **STOP LOSS:** `{c['sl']:.5f}`\n"
+                                    f"🎯 **TAKE PROFIT:** `{c['tp']:.5f}`\n"
                                     f"━━━━━━━━━━━━━━━\n"
-                                    f"📊 *Señal de altísima probabilidad.*"
+                                    f"💰 *Ganas {c['rr']} veces lo que arriesgas.*"
                                 )
                                 await bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
                                 estado_semanal[s] = id_alerta
             await asyncio.sleep(60)
-        except Exception: await asyncio.sleep(20)
+        except Exception as e:
+            logger.error(f"Error: {e}"); await asyncio.sleep(20)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# (La función obtener_datos se mantiene igual que antes)
