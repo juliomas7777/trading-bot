@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
-// --- Types --------------------------------------------
+// ─── Types ───────────────────────────────────────────────────────
 interface Signal {
   id: number;
   symbol: string;
@@ -11,118 +11,86 @@ interface Signal {
   sl: number;
   tp: number;
   rr: number;
-  atr: number;
   timeframes: string[];
   entryTf: string;
   strategies: Record<string, "COMPRA" | "VENTA" | null>;
   time: string;
 }
 
-// --- Constants -----------------------------------------
-const HORA_INICIO = { h: 7, m: 0 };
-const HORA_FIN = { h: 22, m: 0 };
-const SCORE_MIN = 65;
-const RR_MIN = 2.0;
-const COOLDOWN = 90;
-const TG_TOKEN = "8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y";
-const CHAT_ID = "541470482";
+// ─── Constants ───────────────────────────────────────────────────
+const HORA_INICIO = { h: 7,  m: 0 };
+const HORA_FIN    = { h: 22, m: 0 };
+const SCORE_MIN   = 65;
+const RR_MIN      = 2.0;
 
 const ASSETS: Record<string, string[]> = {
-  FOREX: ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDJPY=X", "EURGBP=X"],
-  CRYPTO: ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"],
-  ACCIONES: ["NVDA", "TSLA", "SPY", "QQQ", "AAPL"],
-  MATERIAS: ["GC=F", "SI=F", "CL=F"],
+  FOREX:    ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDJPY=X", "EURGBP=X"],
+  CRYPTO:   ["BTC-USD",  "ETH-USD",  "SOL-USD",  "BNB-USD"],
+  ACCIONES: ["NVDA",     "TSLA",     "SPY",       "QQQ",     "AAPL"],
+  MATERIAS: ["GC=F",     "SI=F",     "CL=F"],
 };
 
 const STRATEGIES = [
-  { key: "tendencia_ema", label: "EMA 20/50/200 Tendencia", icon: "📊", weight: 20 },
-  { key: "order_block_smc", label: "Order Block SMC", icon: "🏦", weight: 15 },
-  { key: "divergencia_rsi", label: "Divergencia RSI", icon: "🔀", weight: 15 },
-  { key: "stoch_rsi", label: "Stochastic RSI", icon: "📉", weight: 10 },
-  { key: "bollinger", label: "Bandas de Bollinger", icon: "🎯", weight: 10 },
-  { key: "patron_velas", label: "Patrón de Velas", icon: "🕯️", weight: 10 },
+  { key: "tendencia_ema",       label: "EMA 20/50/200",       icon: "📊", weight: 20 },
+  { key: "order_block_smc",     label: "Order Block SMC",     icon: "🏦", weight: 15 },
+  { key: "divergencia_rsi",     label: "Divergencia RSI",     icon: "🔀", weight: 15 },
+  { key: "stoch_rsi",           label: "Stochastic RSI",      icon: "📉", weight: 10 },
+  { key: "bollinger",           label: "Bollinger Bands",     icon: "🎯", weight: 10 },
+  { key: "patron_velas",        label: "Patrón de Velas",     icon: "🕯️", weight: 10 },
   { key: "soporte_resistencia", label: "Soporte/Resistencia", icon: "🧱", weight: 10 },
-  { key: "macd_cruce", label: "MACD Cruce", icon: "⚡", weight: 5 },
-  { key: "canal_regresion", label: "Canal Regresión", icon: "📐", weight: 5 },
+  { key: "macd_cruce",          label: "MACD Cruce",          icon: "⚡", weight:  5 },
+  { key: "canal_regresion",     label: "Canal Regresión",     icon: "📐", weight:  5 },
 ];
 
-const CATEGORY_BG: Record<string, string> = {
-  FOREX: "bg-blue-500/10 border-blue-500/30 text-blue-300",
-  CRYPTO: "bg-orange-500/10 border-orange-500/30 text-orange-300",
+const CAT_STYLE: Record<string, string> = {
+  FOREX:    "bg-blue-500/10   border-blue-500/30   text-blue-300",
+  CRYPTO:   "bg-orange-500/10 border-orange-500/30 text-orange-300",
   ACCIONES: "bg-violet-500/10 border-violet-500/30 text-violet-300",
-  MATERIAS: "bg-green-500/10 border-green-500/30 text-green-300",
+  MATERIAS: "bg-green-500/10  border-green-500/30  text-green-300",
 };
 
-// --- Helpers ------------------------------------------
-function getCETTime() {
+// ─── Helpers ─────────────────────────────────────────────────────
+function getCET() {
   const now = new Date();
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  return new Date(utcMs + 3600000); // +1h CET
+  return new Date(now.getTime() + now.getTimezoneOffset() * 60000 + 3600000);
 }
 
-function isWithinSchedule(cet: Date): boolean {
-  const h = cet.getHours();
-  const m = cet.getMinutes();
-  const totalMin = h * 60 + m;
-  const start = HORA_INICIO.h * 60 + HORA_INICIO.m;
-  const end = HORA_FIN.h * 60 + HORA_FIN.m;
-  return totalMin >= start && totalMin <= end;
+function inSchedule(d: Date) {
+  const t = d.getHours() * 60 + d.getMinutes();
+  return t >= HORA_INICIO.h * 60 && t <= HORA_FIN.h * 60;
 }
 
-function formatCET(d: Date): string {
+function fmtTime(d: Date) {
   return d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-
-function formatDateCET(d: Date): string {
+function fmtDate(d: Date) {
   return d.toLocaleDateString("es-ES", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 }
 
-function scheduleProgress(cet: Date): number {
-  const h = cet.getHours();
-  const totalMin = h * 60 + cet.getMinutes();
-  const start = HORA_INICIO.h * 60;
-  const end = HORA_FIN.h * 60;
-  if (totalMin < start) return 0;
-  if (totalMin > end) return 100;
-  return Math.round(((totalMin - start) / (end - start)) * 100);
-}
-
-function timeUntilOpen(cet: Date): string {
-  const totalMin = cet.getHours() * 60 + cet.getMinutes();
-  const openMin = HORA_INICIO.h * 60;
-  if (totalMin >= openMin && totalMin <= HORA_FIN.h * 60) return "ACTIVO";
-  const remaining = totalMin < openMin ? openMin - totalMin : 24 * 60 - totalMin + openMin;
-  return `${Math.floor(remaining / 60)}h ${remaining % 60}m`;
-}
-
-let sigId = 1;
+let _id = 1;
 function makeSignal(): Signal {
-  const cats = Object.keys(ASSETS);
-  const cat = cats[Math.floor(Math.random() * cats.length)];
-  const syms = ASSETS[cat];
-  const sym = syms[Math.floor(Math.random() * syms.length)];
-  const dir = Math.random() > 0.5 ? "COMPRA" : "VENTA";
+  const cat  = Object.keys(ASSETS)[Math.floor(Math.random() * 4)];
+  const sym  = ASSETS[cat][Math.floor(Math.random() * ASSETS[cat].length)];
+  const dir  = Math.random() > 0.5 ? "COMPRA" : "VENTA" as const;
   const score = SCORE_MIN + Math.floor(Math.random() * 30);
-  const tfs = ["5m", "15m", "1h", "4h"];
-  const activeTfs = tfs.filter(() => Math.random() > 0.4);
-  if (activeTfs.length < 2) activeTfs.push("1h", "4h");
+  const tfs = ["5m","15m","1h","4h"].filter(() => Math.random() > 0.4);
+  if (tfs.length < 2) tfs.push("1h","4h");
   const entry = parseFloat((Math.random() * 5000 + 1).toFixed(5));
-  const atr = parseFloat((entry * 0.002).toFixed(5));
+  const atr   = parseFloat((entry * 0.002).toFixed(5));
   const sl = parseFloat((dir === "COMPRA" ? entry - atr * 1.2 : entry + atr * 1.2).toFixed(5));
   const tp = parseFloat((dir === "COMPRA" ? entry + atr * 2.8 : entry - atr * 2.8).toFixed(5));
   const rr = parseFloat((Math.abs(tp - entry) / Math.abs(sl - entry)).toFixed(2));
-  const strategies: Record<string, "COMPRA" | "VENTA" | null> = {};
+  const strats: Record<string, "COMPRA" | "VENTA" | null> = {};
   STRATEGIES.forEach(s => {
     const r = Math.random();
-    strategies[s.key] = r < 0.6 ? dir : r < 0.8 ? (dir === "COMPRA" ? "VENTA" : "COMPRA") : null;
+    strats[s.key] = r < 0.6 ? dir : r < 0.8 ? (dir === "COMPRA" ? "VENTA" : "COMPRA") : null;
   });
-  return { id: sigId++, symbol: sym, category: cat, direction: dir, score, entry, sl, tp, rr, atr, timeframes: activeTfs, entryTf: activeTfs[activeTfs.length - 1], strategies, time: formatCET(getCETTime()) + " CET" };
+  return { id: _id++, symbol: sym, category: cat, direction: dir, score, entry, sl, tp, rr, timeframes: tfs, entryTf: tfs[tfs.length - 1], strategies: strats, time: fmtTime(getCET()) + " CET" };
 }
 
-// --- COMPONENTS ---------------------------------------
-
+// ─── Score Ring ──────────────────────────────────────────────────
 function ScoreRing({ score }: { score: number }) {
-  const r = 28;
+  const r    = 28;
   const circ = 2 * Math.PI * r;
   const fill = (score / 100) * circ;
   const color = score >= 80 ? "#22c55e" : score >= 65 ? "#eab308" : "#ef4444";
@@ -132,139 +100,293 @@ function ScoreRing({ score }: { score: number }) {
         <circle cx="36" cy="36" r={r} fill="none" stroke="#1e293b" strokeWidth="6" />
         <circle cx="36" cy="36" r={r} fill="none" stroke={color} strokeWidth="6"
           strokeDasharray={`${fill} ${circ}`} strokeLinecap="round"
-          style={{ transition: "stroke-dasharray 0.6s ease" }}
-        />
+          style={{ transition: "stroke-dasharray 0.6s ease" }} />
       </svg>
       <span className="absolute text-sm font-bold" style={{ color }}>{score}</span>
     </div>
   );
 }
 
-function StrategyRow({ label, icon, dir, targetDir }: { label: string; icon: string; dir: "COMPRA" | "VENTA" | null; targetDir: "COMPRA" | "VENTA" }) {
-  const isMatch = dir === targetDir;
+// ─── Strategy Row ────────────────────────────────────────────────
+function StratRow({ icon, label, dir, target }: { icon: string; label: string; dir: "COMPRA" | "VENTA" | null; target: "COMPRA" | "VENTA" }) {
   return (
     <div className="flex items-center gap-2 py-1 border-b border-slate-700/40 last:border-0">
-      <span className="text-base w-6 text-center">{icon}</span>
+      <span className="w-5 text-center text-sm">{icon}</span>
       <span className="flex-1 text-xs text-slate-300">{label}</span>
-      {dir === null ? (
-        <span className="text-slate-500 text-xs">⚪ —</span>
-      ) : isMatch ? (
-        <span className="text-green-400 text-xs font-semibold">✅ {dir}</span>
-      ) : (
-        <span className="text-red-400 text-xs font-semibold">❌ {dir}</span>
-      )}
+      {dir === null
+        ? <span className="text-slate-500 text-xs">⚪ —</span>
+        : dir === target
+          ? <span className="text-green-400 text-xs font-semibold">✅ {dir}</span>
+          : <span className="text-red-400 text-xs font-semibold">❌ {dir}</span>}
     </div>
   );
 }
 
-function SignalCard({ sig, onClose }: { sig: Signal; onClose?: () => void }) {
-  const isBuy = sig.direction === "COMPRA";
-  const dirColor = isBuy ? "text-green-400" : "text-red-400";
-  const dirBg = isBuy ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30";
+// ─── Signal Card ─────────────────────────────────────────────────
+function SignalCard({ sig, onClose }: { sig: Signal; onClose: () => void }) {
+  const buy = sig.direction === "COMPRA";
+  const dirBg = buy ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30";
+  const dirColor = buy ? "text-green-400" : "text-red-400";
   return (
-    <div className={`rounded-2xl border ${dirBg} p-4 flex flex-col gap-3 shadow-lg relative`}>
-      {onClose && (
-        <button onClick={onClose} className="absolute top-3 right-3 text-slate-500 hover:text-slate-200 text-lg leading-none">✕</button>
-      )}
+    <div className={`rounded-2xl border ${dirBg} p-4 flex flex-col gap-3 shadow-lg relative animate-fade-in`}>
+      <button onClick={onClose} className="absolute top-3 right-3 text-slate-500 hover:text-slate-200 text-lg">✕</button>
+
+      {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="text-2xl">{isBuy ? "🟢" : "🔴"}</div>
+        <span className="text-2xl">{buy ? "🟢" : "🔴"}</span>
         <div className="flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`font-bold text-lg ${dirColor}`}>{sig.direction}</span>
-            <span className="font-mono font-bold text-white text-base">{sig.symbol}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full border ${CATEGORY_BG[sig.category]}`}>{sig.category}</span>
+            <span className="font-mono font-bold text-white">{sig.symbol}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full border ${CAT_STYLE[sig.category]}`}>{sig.category}</span>
           </div>
-          <div className="text-xs text-slate-400 mt-0.5">🕐 {sig.time}</div>
+          <div className="text-xs text-slate-400">🕐 {sig.time}</div>
         </div>
         <ScoreRing score={sig.score} />
       </div>
 
+      {/* Timeframes */}
       <div className="flex gap-1 flex-wrap">
         {sig.timeframes.map(tf => (
-          <span key={tf} className={`text-xs px-2 py-0.5 rounded border font-mono ${tf === sig.entryTf ? "bg-yellow-500/20 border-yellow-500/50 text-yellow-300 font-bold" : "bg-slate-700/50 border-slate-600/40 text-slate-300"}`}>
+          <span key={tf} className={`text-xs px-2 py-0.5 rounded border font-mono ${
+            tf === sig.entryTf
+              ? "bg-yellow-500/20 border-yellow-500/50 text-yellow-300 font-bold"
+              : "bg-slate-700/50 border-slate-600/40 text-slate-300"
+          }`}>
             {tf === sig.entryTf ? `⭐ ${tf.toUpperCase()}` : tf.toUpperCase()}
           </span>
         ))}
       </div>
 
+      {/* Levels */}
       <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-xl bg-slate-800/60 p-2 text-center border border-slate-700/40">
-          <div className="text-xs text-slate-400 mb-1">💰 Entrada</div>
-          <div className="font-mono text-sm text-white font-semibold">{sig.entry}</div>
-        </div>
-        <div className="rounded-xl bg-red-900/20 p-2 text-center border border-red-800/30">
-          <div className="text-xs text-slate-400 mb-1">🛑 SL</div>
-          <div className="font-mono text-sm text-red-400 font-semibold">{sig.sl}</div>
-        </div>
-        <div className="rounded-xl bg-green-900/20 p-2 text-center border border-green-800/30">
-          <div className="text-xs text-slate-400 mb-1">🎯 TP</div>
-          <div className="font-mono text-sm text-green-400 font-semibold">{sig.tp}</div>
-        </div>
+        {[
+          { label: "💰 Entrada", val: sig.entry,  cls: "bg-slate-800/60 border-slate-700/40",    txt: "text-white"   },
+          { label: "🛑 SL",      val: sig.sl,     cls: "bg-red-900/20   border-red-800/30",      txt: "text-red-400" },
+          { label: "🎯 TP",      val: sig.tp,     cls: "bg-green-900/20 border-green-800/30",    txt: "text-green-400" },
+        ].map(({ label, val, cls, txt }) => (
+          <div key={label} className={`rounded-xl ${cls} border p-2 text-center`}>
+            <div className="text-xs text-slate-400 mb-1">{label}</div>
+            <div className={`font-mono text-sm font-semibold ${txt}`}>{val}</div>
+          </div>
+        ))}
       </div>
 
+      {/* R/R */}
+      <div className="flex items-center gap-2 bg-slate-800/40 rounded-xl px-3 py-2 border border-slate-700/30">
+        <span className="text-xs text-slate-400">⚖️ Riesgo / Beneficio</span>
+        <span className={`ml-auto font-bold text-sm ${sig.rr >= RR_MIN ? "text-green-400" : "text-yellow-400"}`}>{sig.rr}:1</span>
+      </div>
+
+      {/* Strategies */}
       <div className="rounded-xl bg-slate-900/60 border border-slate-700/30 p-3">
-        <div className="text-xs text-slate-400 font-semibold mb-2 uppercase">Confirmaciones</div>
+        <div className="text-xs text-slate-400 font-semibold mb-2 uppercase tracking-wide">Confirmaciones</div>
         {STRATEGIES.map(s => (
-          <StrategyRow key={s.key} label={s.label} icon={s.icon} dir={sig.strategies[s.key] ?? null} targetDir={sig.direction} />
+          <StratRow key={s.key} icon={s.icon} label={s.label} dir={sig.strategies[s.key] ?? null} target={sig.direction} />
         ))}
       </div>
     </div>
   );
 }
 
-// --- MAIN APP -----------------------------------------
+// ─── Stats Bar ───────────────────────────────────────────────────
+function StatsBar({ signals }: { signals: Signal[] }) {
+  const buys  = signals.filter(s => s.direction === "COMPRA").length;
+  const sells = signals.filter(s => s.direction === "VENTA").length;
+  const avgScore = signals.length ? Math.round(signals.reduce((a, s) => a + s.score, 0) / signals.length) : 0;
+  const avgRR    = signals.length ? (signals.reduce((a, s) => a + s.rr, 0) / signals.length).toFixed(2) : "—";
 
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {[
+        { label: "Señales",    value: signals.length, sub: "total",       color: "text-white"        },
+        { label: "COMPRA",     value: buys,           sub: "en cola",     color: "text-green-400"    },
+        { label: "VENTA",      value: sells,          sub: "en cola",     color: "text-red-400"      },
+        { label: "Score Avg",  value: avgScore || "—",sub: `R/R ${avgRR}`,color: "text-yellow-400"   },
+      ].map(({ label, value, sub, color }) => (
+        <div key={label} className="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-3 text-center">
+          <div className={`text-2xl font-bold ${color}`}>{value}</div>
+          <div className="text-xs text-slate-400 mt-0.5">{label}</div>
+          <div className="text-xs text-slate-500">{sub}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Setup Guide ─────────────────────────────────────────────────
+function SetupGuide() {
+  const [open, setOpen] = useState(false);
+  const steps = [
+    { icon: "1️⃣", title: "Clona el repositorio", code: "git clone https://github.com/tu-usuario/tu-repo.git" },
+    { icon: "2️⃣", title: "Añade los Secrets en GitHub", code: "Settings → Secrets → TG_TOKEN + CHAT_ID" },
+    { icon: "3️⃣", title: "Activa GitHub Actions", code: ".github/workflows/trading_bot.yml  (ya incluido)" },
+    { icon: "4️⃣", title: "O ejecútalo localmente", code: "pip install -r trading_bot/requirements.txt\npython trading_bot/bot.py" },
+  ];
+  return (
+    <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 overflow-hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between p-4 text-left">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🐍</span>
+          <span className="font-semibold text-violet-300">Configuración Python / GitHub</span>
+        </div>
+        <span className="text-slate-400 text-sm">{open ? "▲ ocultar" : "▼ ver guía"}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          {steps.map(s => (
+            <div key={s.icon} className="rounded-xl bg-slate-900/60 border border-slate-700/40 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span>{s.icon}</span>
+                <span className="text-sm font-semibold text-slate-200">{s.title}</span>
+              </div>
+              <pre className="text-xs text-green-300 bg-black/30 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap">{s.code}</pre>
+            </div>
+          ))}
+          <div className="text-xs text-slate-500 pt-1">
+            📄 Archivos generados: <code className="text-violet-300">trading_bot/bot.py</code> · <code className="text-violet-300">bot_single.py</code> · <code className="text-violet-300">.github/workflows/trading_bot.yml</code>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main App ────────────────────────────────────────────────────
 export default function App() {
-  const [cet, setCet] = useState(getCETTime());
+  const [cet, setCet]         = useState(getCET());
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [botRunning, setBotRunning] = useState(true);
+  const [running, setRunning] = useState(true);
+  const [tab, setTab]         = useState<"signals" | "guide">("signals");
 
   useEffect(() => {
-    const t = setInterval(() => setCet(getCETTime()), 1000);
+    const t = setInterval(() => setCet(getCET()), 1000);
     return () => clearInterval(t);
   }, []);
 
   useEffect(() => {
-    if (!botRunning) return;
-    const interval = setInterval(() => {
-      if (!isWithinSchedule(getCETTime())) return;
-      if (Math.random() > 0.7) {
-        setSignals(prev => [makeSignal(), ...prev].slice(0, 10));
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [botRunning]);
+    if (!running) return;
+    const t = setInterval(() => {
+      if (!inSchedule(getCET())) return;
+      if (Math.random() > 0.65) return;
+      setSignals(prev => {
+        const s = makeSignal();
+        if (s.score < SCORE_MIN || s.rr < RR_MIN) return prev;
+        return [s, ...prev].slice(0, 12);
+      });
+    }, 4000);
+    return () => clearInterval(t);
+  }, [running]);
 
-  const active = isWithinSchedule(cet);
+  const active = inSchedule(cet);
+  const totalMin = cet.getHours() * 60 + cet.getMinutes();
+  const pct = Math.min(100, Math.max(0, Math.round(
+    ((totalMin - HORA_INICIO.h * 60) / ((HORA_FIN.h - HORA_INICIO.h) * 60)) * 100
+  )));
 
   return (
-    <div className="min-h-screen bg-[#0a0f1e] text-white p-4">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between bg-slate-800/40 p-6 rounded-3xl border border-slate-700/50">
-          <div>
-            <h1 className="text-2xl font-bold">Trading Bot <span className="text-violet-400 text-sm font-mono">v3.0</span></h1>
-            <p className="text-slate-400 text-sm">{formatDateCET(cet)}</p>
+    <div className="min-h-screen bg-[#080d1a] text-white">
+      {/* Header */}
+      <header className="sticky top-0 z-20 bg-[#080d1a]/90 backdrop-blur border-b border-slate-800/60 px-4 py-3">
+        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center text-lg shadow-lg shadow-violet-900/40">
+              🤖
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-base">Trading Bot</span>
+                <span className="text-violet-400 text-xs font-mono bg-violet-500/10 px-1.5 py-0.5 rounded">v3.0</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? "bg-green-500/20 text-green-400" : "bg-slate-700/50 text-slate-400"}`}>
+                  {active ? "● ACTIVO" : "● CERRADO"}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500">{fmtDate(cet)}</div>
+            </div>
           </div>
-          <button 
-            onClick={() => setBotRunning(!botRunning)}
-            className={`px-6 py-2 rounded-full font-bold transition-all ${botRunning ? "bg-red-500/20 text-red-400 border border-red-500/40" : "bg-green-500/20 text-green-400 border border-green-500/40"}`}
-          >
-            {botRunning ? "PAUSAR BOT" : "INICIAR BOT"}
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="text-right hidden sm:block">
+              <div className="font-mono text-sm text-slate-200">{fmtTime(cet)}</div>
+              <div className="text-xs text-slate-500">CET</div>
+            </div>
+            <button
+              onClick={() => setRunning(r => !r)}
+              className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                running
+                  ? "bg-red-500/15 border-red-500/40 text-red-400 hover:bg-red-500/25"
+                  : "bg-green-500/15 border-green-500/40 text-green-400 hover:bg-green-500/25"
+              }`}
+            >
+              {running ? "⏸ PAUSAR" : "▶ INICIAR"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-4 py-5 space-y-5">
+
+        {/* Schedule Bar */}
+        <div className="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-4 space-y-2">
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>07:00 CET</span>
+            <span className={`font-semibold ${active ? "text-green-400" : "text-slate-400"}`}>
+              {active ? `${pct}% del día operativo` : "Fuera de horario (07:00–22:00 CET)"}
+            </span>
+            <span>22:00 CET</span>
+          </div>
+          <div className="h-2 bg-slate-700/60 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-1000 ${active ? "bg-gradient-to-r from-violet-500 to-green-400" : "bg-slate-600"}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
         </div>
 
-        <div className="space-y-4">
-          {!active && (
-            <div className="p-10 text-center bg-slate-800/30 rounded-3xl border border-slate-700/40">
-              <span className="text-4xl">😴</span>
-              <p className="mt-2 text-slate-400">Fuera de horario operativo (07:00 - 22:00 CET)</p>
-            </div>
-          )}
-          {signals.map(sig => (
-            <SignalCard key={sig.id} sig={sig} onClose={() => setSignals(prev => prev.filter(s => s.id !== sig.id))} />
+        {/* Stats */}
+        <StatsBar signals={signals} />
+
+        {/* Tabs */}
+        <div className="flex gap-2 border-b border-slate-800/60 pb-1">
+          {(["signals", "guide"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-1.5 rounded-t-lg text-sm font-medium transition-all ${
+                tab === t ? "bg-slate-800/60 text-white border border-b-0 border-slate-700/50" : "text-slate-500 hover:text-slate-300"
+              }`}>
+              {t === "signals" ? "📡 Señales" : "🐍 Setup Python"}
+            </button>
           ))}
         </div>
-      </div>
+
+        {tab === "guide" && (
+          <SetupGuide />
+        )}
+
+        {tab === "signals" && (
+          <div className="space-y-4">
+            {!active && (
+              <div className="text-center py-12 bg-slate-800/20 rounded-3xl border border-slate-700/30">
+                <div className="text-5xl mb-3">😴</div>
+                <p className="text-slate-400 font-medium">Fuera del horario operativo</p>
+                <p className="text-slate-500 text-sm mt-1">07:00 – 22:00 CET · Lun–Vie</p>
+              </div>
+            )}
+            {active && signals.length === 0 && (
+              <div className="text-center py-12 bg-slate-800/20 rounded-3xl border border-slate-700/30">
+                <div className="text-5xl mb-3 animate-pulse">📡</div>
+                <p className="text-slate-400 font-medium">Escaneando mercados…</p>
+                <p className="text-slate-500 text-sm mt-1">Score mín. {SCORE_MIN} · R/R mín. {RR_MIN}</p>
+              </div>
+            )}
+            {signals.map(sig => (
+              <SignalCard
+                key={sig.id}
+                sig={sig}
+                onClose={() => setSignals(p => p.filter(s => s.id !== sig.id))}
+              />
+            ))}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
