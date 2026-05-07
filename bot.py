@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-// ─── Types ───────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------
 interface Signal {
   id: number;
   symbol: string;
@@ -17,7 +17,11 @@ interface Signal {
   time: string;
 }
 
-// ─── Constants ───────────────────────────────────────────────────
+// --- Constants ---------------------------------------------------
+// Tus credenciales configuradas:
+const TG_TOKEN = "8634623188:AAGzszzc3rDt1xR3RGy5SuotJkMixTihU-Y";
+const CHAT_ID = "541470482";
+
 const HORA_INICIO = { h: 7,  m: 0 };
 const HORA_FIN    = { h: 22, m: 0 };
 const SCORE_MIN   = 65;
@@ -31,15 +35,15 @@ const ASSETS: Record<string, string[]> = {
 };
 
 const STRATEGIES = [
-  { key: "tendencia_ema",       label: "EMA 20/50/200",       icon: "📊", weight: 20 },
+  { key: "tendencia_ema",        label: "EMA 20/50/200",       icon: "📊", weight: 20 },
   { key: "order_block_smc",     label: "Order Block SMC",     icon: "🏦", weight: 15 },
   { key: "divergencia_rsi",     label: "Divergencia RSI",     icon: "🔀", weight: 15 },
-  { key: "stoch_rsi",           label: "Stochastic RSI",      icon: "📉", weight: 10 },
-  { key: "bollinger",           label: "Bollinger Bands",     icon: "🎯", weight: 10 },
-  { key: "patron_velas",        label: "Patrón de Velas",     icon: "🕯️", weight: 10 },
+  { key: "stoch_rsi",            label: "Stochastic RSI",      icon: "📉", weight: 10 },
+  { key: "bollinger",            label: "Bollinger Bands",     icon: "🎯", weight: 10 },
+  { key: "patron_velas",         label: "Patrón de Velas",     icon: "🕯️", weight: 10 },
   { key: "soporte_resistencia", label: "Soporte/Resistencia", icon: "🧱", weight: 10 },
-  { key: "macd_cruce",          label: "MACD Cruce",          icon: "⚡", weight:  5 },
-  { key: "canal_regresion",     label: "Canal Regresión",     icon: "📐", weight:  5 },
+  { key: "macd_cruce",           label: "MACD Cruce",           icon: "⚡", weight:  5 },
+  { key: "canal_regresion",      label: "Canal Regresión",      icon: "📐", weight:  5 },
 ];
 
 const CAT_STYLE: Record<string, string> = {
@@ -49,7 +53,7 @@ const CAT_STYLE: Record<string, string> = {
   MATERIAS: "bg-green-500/10  border-green-500/30  text-green-300",
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------
 function getCET() {
   const now = new Date();
   return new Date(now.getTime() + now.getTimezoneOffset() * 60000 + 3600000);
@@ -88,9 +92,9 @@ function makeSignal(): Signal {
   return { id: _id++, symbol: sym, category: cat, direction: dir, score, entry, sl, tp, rr, timeframes: tfs, entryTf: tfs[tfs.length - 1], strategies: strats, time: fmtTime(getCET()) + " CET" };
 }
 
-// ─── Score Ring ──────────────────────────────────────────────────
+// --- Score Ring --------------------------------------------------
 function ScoreRing({ score }: { score: number }) {
-  const r    = 28;
+  const r     = 28;
   const circ = 2 * Math.PI * r;
   const fill = (score / 100) * circ;
   const color = score >= 80 ? "#22c55e" : score >= 65 ? "#eab308" : "#ef4444";
@@ -107,7 +111,7 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-// ─── Strategy Row ────────────────────────────────────────────────
+// --- Strategy Row ------------------------------------------------
 function StratRow({ icon, label, dir, target }: { icon: string; label: string; dir: "COMPRA" | "VENTA" | null; target: "COMPRA" | "VENTA" }) {
   return (
     <div className="flex items-center gap-2 py-1 border-b border-slate-700/40 last:border-0">
@@ -122,7 +126,7 @@ function StratRow({ icon, label, dir, target }: { icon: string; label: string; d
   );
 }
 
-// ─── Signal Card ─────────────────────────────────────────────────
+// --- Signal Card -------------------------------------------------
 function SignalCard({ sig, onClose }: { sig: Signal; onClose: () => void }) {
   const buy = sig.direction === "COMPRA";
   const dirBg = buy ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30";
@@ -131,7 +135,6 @@ function SignalCard({ sig, onClose }: { sig: Signal; onClose: () => void }) {
     <div className={`rounded-2xl border ${dirBg} p-4 flex flex-col gap-3 shadow-lg relative animate-fade-in`}>
       <button onClick={onClose} className="absolute top-3 right-3 text-slate-500 hover:text-slate-200 text-lg">✕</button>
 
-      {/* Header */}
       <div className="flex items-center gap-3">
         <span className="text-2xl">{buy ? "🟢" : "🔴"}</span>
         <div className="flex-1">
@@ -145,7 +148,6 @@ function SignalCard({ sig, onClose }: { sig: Signal; onClose: () => void }) {
         <ScoreRing score={sig.score} />
       </div>
 
-      {/* Timeframes */}
       <div className="flex gap-1 flex-wrap">
         {sig.timeframes.map(tf => (
           <span key={tf} className={`text-xs px-2 py-0.5 rounded border font-mono ${
@@ -158,7 +160,6 @@ function SignalCard({ sig, onClose }: { sig: Signal; onClose: () => void }) {
         ))}
       </div>
 
-      {/* Levels */}
       <div className="grid grid-cols-3 gap-2">
         {[
           { label: "💰 Entrada", val: sig.entry,  cls: "bg-slate-800/60 border-slate-700/40",    txt: "text-white"   },
@@ -172,13 +173,11 @@ function SignalCard({ sig, onClose }: { sig: Signal; onClose: () => void }) {
         ))}
       </div>
 
-      {/* R/R */}
       <div className="flex items-center gap-2 bg-slate-800/40 rounded-xl px-3 py-2 border border-slate-700/30">
         <span className="text-xs text-slate-400">⚖️ Riesgo / Beneficio</span>
         <span className={`ml-auto font-bold text-sm ${sig.rr >= RR_MIN ? "text-green-400" : "text-yellow-400"}`}>{sig.rr}:1</span>
       </div>
 
-      {/* Strategies */}
       <div className="rounded-xl bg-slate-900/60 border border-slate-700/30 p-3">
         <div className="text-xs text-slate-400 font-semibold mb-2 uppercase tracking-wide">Confirmaciones</div>
         {STRATEGIES.map(s => (
@@ -189,7 +188,7 @@ function SignalCard({ sig, onClose }: { sig: Signal; onClose: () => void }) {
   );
 }
 
-// ─── Stats Bar ───────────────────────────────────────────────────
+// --- Stats Bar ---------------------------------------------------
 function StatsBar({ signals }: { signals: Signal[] }) {
   const buys  = signals.filter(s => s.direction === "COMPRA").length;
   const sells = signals.filter(s => s.direction === "VENTA").length;
@@ -214,7 +213,7 @@ function StatsBar({ signals }: { signals: Signal[] }) {
   );
 }
 
-// ─── Setup Guide ─────────────────────────────────────────────────
+// --- Setup Guide -------------------------------------------------
 function SetupGuide() {
   const [open, setOpen] = useState(false);
   const steps = [
@@ -252,7 +251,7 @@ function SetupGuide() {
   );
 }
 
-// ─── Main App ────────────────────────────────────────────────────
+// --- Main App ----------------------------------------------------
 export default function App() {
   const [cet, setCet]         = useState(getCET());
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -261,132 +260,4 @@ export default function App() {
 
   useEffect(() => {
     const t = setInterval(() => setCet(getCET()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => {
-      if (!inSchedule(getCET())) return;
-      if (Math.random() > 0.65) return;
-      setSignals(prev => {
-        const s = makeSignal();
-        if (s.score < SCORE_MIN || s.rr < RR_MIN) return prev;
-        return [s, ...prev].slice(0, 12);
-      });
-    }, 4000);
-    return () => clearInterval(t);
-  }, [running]);
-
-  const active = inSchedule(cet);
-  const totalMin = cet.getHours() * 60 + cet.getMinutes();
-  const pct = Math.min(100, Math.max(0, Math.round(
-    ((totalMin - HORA_INICIO.h * 60) / ((HORA_FIN.h - HORA_INICIO.h) * 60)) * 100
-  )));
-
-  return (
-    <div className="min-h-screen bg-[#080d1a] text-white">
-      {/* Header */}
-      <header className="sticky top-0 z-20 bg-[#080d1a]/90 backdrop-blur border-b border-slate-800/60 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center text-lg shadow-lg shadow-violet-900/40">
-              🤖
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-base">Trading Bot</span>
-                <span className="text-violet-400 text-xs font-mono bg-violet-500/10 px-1.5 py-0.5 rounded">v3.0</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? "bg-green-500/20 text-green-400" : "bg-slate-700/50 text-slate-400"}`}>
-                  {active ? "● ACTIVO" : "● CERRADO"}
-                </span>
-              </div>
-              <div className="text-xs text-slate-500">{fmtDate(cet)}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="text-right hidden sm:block">
-              <div className="font-mono text-sm text-slate-200">{fmtTime(cet)}</div>
-              <div className="text-xs text-slate-500">CET</div>
-            </div>
-            <button
-              onClick={() => setRunning(r => !r)}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                running
-                  ? "bg-red-500/15 border-red-500/40 text-red-400 hover:bg-red-500/25"
-                  : "bg-green-500/15 border-green-500/40 text-green-400 hover:bg-green-500/25"
-              }`}
-            >
-              {running ? "⏸ PAUSAR" : "▶ INICIAR"}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-3xl mx-auto px-4 py-5 space-y-5">
-
-        {/* Schedule Bar */}
-        <div className="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-4 space-y-2">
-          <div className="flex justify-between text-xs text-slate-400">
-            <span>07:00 CET</span>
-            <span className={`font-semibold ${active ? "text-green-400" : "text-slate-400"}`}>
-              {active ? `${pct}% del día operativo` : "Fuera de horario (07:00–22:00 CET)"}
-            </span>
-            <span>22:00 CET</span>
-          </div>
-          <div className="h-2 bg-slate-700/60 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-1000 ${active ? "bg-gradient-to-r from-violet-500 to-green-400" : "bg-slate-600"}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Stats */}
-        <StatsBar signals={signals} />
-
-        {/* Tabs */}
-        <div className="flex gap-2 border-b border-slate-800/60 pb-1">
-          {(["signals", "guide"] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-1.5 rounded-t-lg text-sm font-medium transition-all ${
-                tab === t ? "bg-slate-800/60 text-white border border-b-0 border-slate-700/50" : "text-slate-500 hover:text-slate-300"
-              }`}>
-              {t === "signals" ? "📡 Señales" : "🐍 Setup Python"}
-            </button>
-          ))}
-        </div>
-
-        {tab === "guide" && (
-          <SetupGuide />
-        )}
-
-        {tab === "signals" && (
-          <div className="space-y-4">
-            {!active && (
-              <div className="text-center py-12 bg-slate-800/20 rounded-3xl border border-slate-700/30">
-                <div className="text-5xl mb-3">😴</div>
-                <p className="text-slate-400 font-medium">Fuera del horario operativo</p>
-                <p className="text-slate-500 text-sm mt-1">07:00 – 22:00 CET · Lun–Vie</p>
-              </div>
-            )}
-            {active && signals.length === 0 && (
-              <div className="text-center py-12 bg-slate-800/20 rounded-3xl border border-slate-700/30">
-                <div className="text-5xl mb-3 animate-pulse">📡</div>
-                <p className="text-slate-400 font-medium">Escaneando mercados…</p>
-                <p className="text-slate-500 text-sm mt-1">Score mín. {SCORE_MIN} · R/R mín. {RR_MIN}</p>
-              </div>
-            )}
-            {signals.map(sig => (
-              <SignalCard
-                key={sig.id}
-                sig={sig}
-                onClose={() => setSignals(p => p.filter(s => s.id !== sig.id))}
-              />
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
+    return () => clearInterval(
