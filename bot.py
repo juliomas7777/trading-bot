@@ -57,7 +57,7 @@ def calc_atr(df, p=14):
     return tr.rolling(p).mean()
 
 # -------------------------------------------------------------------
-# ESTRATEGIAS (CON ICT LIMIT CONFIGURADO)
+# ESTRATEGIAS
 # -------------------------------------------------------------------
 def est_alex_ruiz(df_h1, df_h4):
     sma200_h4 = df_h4["close"].rolling(200).mean().iloc[-1]
@@ -72,22 +72,15 @@ def est_alex_ruiz(df_h1, df_h4):
     return None, None, None, None
 
 def est_ict_fvg(df_h1, df_h4):
-    # FVG se detecta entre vela 1 y vela 3
     h1, l1 = df_h1["high"].iloc[-3], df_h1["low"].iloc[-3]
     h3, l3 = df_h1["high"].iloc[-1], df_h1["low"].iloc[-1]
-    
-    tipo = None
-    precio_entrada = None
-    
-    if l3 > h1: # FVG Alcista
+    tipo, precio_entrada = None, None
+    if l3 > h1:
         tipo = "COMPRA"
-        # Entrada al 50% del Gap (Consecuent Encroachment)
         precio_entrada = h1 + (l3 - h1) / 2
-    elif h3 < l1: # FVG Bajista
+    elif h3 < l1:
         tipo = "VENTA"
-        # Entrada al 50% del Gap
         precio_entrada = l1 - (l1 - h3) / 2
-        
     if tipo:
         dir_h4 = "COMPRA" if df_h4["close"].iloc[-1] > df_h4["open"].iloc[-1] else "VENTA"
         if tipo == dir_h4:
@@ -126,18 +119,16 @@ def procesar_activo(ticker, nombre_claro):
                 continue
 
             px_mercado = df_h1["close"].iloc[-1]
-            # Si es ICT usamos su precio limit, si no, precio de mercado
             entrada_final = px_mercado if "limit" not in tipo_ejecucion else float(tipo_ejecucion.split("(")[1].split(")")[0])
             
             atr = calc_atr(df_h1).iloc[-1]
             distancia_sl = atr * m_sl
             sl = entrada_final - distancia_sl if resultado == "COMPRA" else entrada_final + distancia_sl
-            
             tps_finales = [round(entrada_final + (distancia_sl * m if resultado == "COMPRA" else -distancia_sl * m), 5) for m in lista_tps]
             
             ultima_direccion_enviada[id_unico] = resultado
             
-            msg = (f"🕒 <b>PRE-CIERRE DE VELA (H1)</b>\n"
+            msg = (f"⏳ <b>PRE-CAMBIO DE VELA (M15/H1)</b>\n"
                    f"🚀 <b>ESTRATEGIA: {nombre_est}</b>\n"
                    f"━━━━━━━━━━━━━━━━\n"
                    f"📊 <b>Activo:</b> {nombre_claro}\n"
@@ -148,18 +139,30 @@ def procesar_activo(ticker, nombre_claro):
                    f"🎯 <b>TP 1:</b> {tps_finales[0]}\n"
                    f"🎯 <b>TP 2:</b> {tps_finales[1]}\n"
                    f"🎯 <b>TP 3:</b> {tps_finales[2]}\n"
-                   f"━━━━━━━━━━━━━━━━\n"
-                   f"💡 <i>Precio mercado actual: {round(px_mercado, 5)}</i>")
+                   f"━━━━━━━━━━━━━━━━")
             enviar_telegram(msg)
 
-print("Bot configurado: Disparo a las XX:59:30 con órdenes ICT LIMIT (50% FVG).")
+# -------------------------------------------------------------------
+# BUCLE PRINCIPAL (Disparo cada 14m 30s de la vela)
+# -------------------------------------------------------------------
+print("Bot sincronizado: Escaneando 30 segundos antes de cada cuarto de hora.")
+
+minutos_objetivo = [14, 29, 44, 59]
+ultimo_minuto_procesado = -1
 
 while True:
     ahora = datetime.now(TZ)
+    
     if HORA_INICIO <= ahora.hour < HORA_FIN:
-        if ahora.minute == 59 and 30 <= ahora.second <= 59:
-            for ticker, nombre_claro in ASSETS_MAP.items():
-                procesar_activo(ticker, nombre_claro)
-                time.sleep(0.5)
-            time.sleep(40) 
-    time.sleep(1)
+        # Si el minuto actual está en nuestra lista y estamos en el segundo 30
+        if ahora.minute in minutos_objetivo and ahora.second == 30:
+            if ahora.minute != ultimo_minuto_procesado:
+                print(f"[{ahora.strftime('%H:%M:%S')}] Escaneo pre-cierre iniciado...")
+                for ticker, nombre_claro in ASSETS_MAP.items():
+                    procesar_activo(ticker, nombre_claro)
+                    time.sleep(0.3)
+                
+                ultimo_minuto_procesado = ahora.minute
+                print("Escaneo completado. Esperando al siguiente ciclo.")
+    
+    time.sleep(1) # Revisión constante del segundero
