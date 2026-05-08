@@ -43,24 +43,24 @@ NOMBRES_HUMANOS = {
 }
 
 ASSETS = {
-    "FOREX_USD": [
+    "FOREX_USD":[
         "EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCAD=X", "USDCHF=X", "AUDUSD=X", "NZDUSD=X"
     ],
-    "CRYPTO": [
+    "CRYPTO":[
         "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD"
     ],
-    "ACCIONES_US": [
+    "ACCIONES_US":[
         "NVDA", "TSLA", "AAPL", "AMZN", "MSFT", "META", "GOOGL"
     ],
-    "MATERIAS_PRIMAS": [
+    "MATERIAS_PRIMAS":[
         "GC=F", "SI=F", "CL=F", "HG=F", "NG=F"
     ],
 }
 
-TIMEFRAMES = ["5m", "15m", "1h", "4h"]
+TIMEFRAMES =["5m", "15m", "1h", "4h"]
 
 ultima_senal = {}
-historial    = []
+historial    =[]
 reporte_hecho = False
 
 # -------------------------------------------------------------------
@@ -155,7 +155,7 @@ def calc_stoch_rsi(df, p=14):
 
 def calc_pivotes(df, n=5):
     highs, lows = df["high"].values, df["low"].values
-    res, sop = [], []
+    res, sop = [],[]
     for i in range(n, len(df) - n):
         if all(highs[i] >= highs[i-j] for j in range(1, n+1)) and all(highs[i] >= highs[i+j] for j in range(1, n+1)): res.append(highs[i])
         if all(lows[i] <= lows[i-j] for j in range(1, n+1)) and all(lows[i] <= lows[i+j] for j in range(1, n+1)): sop.append(lows[i])
@@ -164,6 +164,65 @@ def calc_pivotes(df, n=5):
 # -------------------------------------------------------------------
 # ESTRATEGIAS
 # -------------------------------------------------------------------
+
+def est_estrategia_video(df):
+    """
+    Estrategia extraída del análisis del vídeo de Alex Ruiz.
+    Usa EMA50, SMA200, MACD y Acción del precio (Envolventes / Breakout visual).
+    """
+    if len(df) < 200: return None
+    
+    close_p = df["close"]
+    open_p  = df["open"]
+    high_p  = df["high"]
+    low_p   = df["low"]
+    
+    # 1. Indicadores principales
+    ema50  = close_p.ewm(span=50, adjust=False).mean()
+    sma200 = close_p.rolling(window=200).mean() # Especifica claramente que es SIMPLE
+    macd_line, macd_sig, macd_hist = calc_macd(close_p)
+    
+    # Manejo de nulos para seguridad
+    if pd.isna(sma200.iloc[-1]) or pd.isna(macd_hist.iloc[-1]): return None
+    
+    # 2. Tolerancia del pullback basada en ATR
+    atr_val = calc_atr(df, 14).iloc[-1]
+    tol = atr_val * 0.4 if not pd.isna(atr_val) else 0.001
+    
+    # Valores actuales y vela anterior
+    c0, c1 = close_p.iloc[-1], close_p.iloc[-2]
+    o0, o1 = open_p.iloc[-1], open_p.iloc[-2]
+    l0, l1 = low_p.iloc[-1], low_p.iloc[-2]
+    h0, h1 = high_p.iloc[-1], high_p.iloc[-2]
+    
+    # 3. Modelado de Ruptura de Diagonal/Patrón (Envolventes)
+    envolvente_alcista = (c1 < o1) and (c0 > o0) and (c0 >= o1) and (o0 <= c1)
+    envolvente_bajista = (c1 > o1) and (c0 < o0) and (c0 <= o1) and (o0 >= c1)
+    
+    hist0, hist1 = macd_hist.iloc[-1], macd_hist.iloc[-2]
+    ema50_0, sma200_0 = ema50.iloc[-1], sma200.iloc[-1]
+    ema50_1, sma200_1 = ema50.iloc[-2], sma200.iloc[-2]
+
+    # Lógica de COMPRA
+    if c0 > sma200_0: # Tendencia macro Alcista
+        # Condición de Pullback (toca o casi toca EMA50 o SMA200)
+        pullback = (abs(l0 - ema50_0) < tol) or (abs(l1 - ema50_1) < tol) or \
+                   (abs(l0 - sma200_0) < tol) or (abs(l1 - sma200_1) < tol)
+        
+        # Confirmaciones: Envolvente (gatillo) y Momentum MACD subiendo
+        if pullback and envolvente_alcista and (hist0 > hist1):
+            return "COMPRA"
+
+    # Lógica de VENTA
+    if c0 < sma200_0: # Tendencia macro Bajista
+        pullback = (abs(h0 - ema50_0) < tol) or (abs(h1 - ema50_1) < tol) or \
+                   (abs(h0 - sma200_0) < tol) or (abs(h1 - sma200_1) < tol)
+                   
+        if pullback and envolvente_bajista and (hist0 < hist1):
+            return "VENTA"
+            
+    return None
+
 def est_ema(df):
     if len(df) < 200: return None
     e20, e50, e200, px = calc_ema(df["close"], 20).iloc[-1], calc_ema(df["close"], 50).iloc[-1], calc_ema(df["close"], 200).iloc[-1], df["close"].iloc[-1]
@@ -227,7 +286,8 @@ def est_canal(df):
     if px >= (linea[-1] + desv * 2.0) * 0.999 and slope < 0: return "VENTA"
     return None
 
-ESTRATEGIAS = [
+ESTRATEGIAS =[
+    ("Estrategia Alex Ruiz", est_estrategia_video), # Añadido el sistema del vídeo aquí
     ("EMA 20/50/200", est_ema), ("ADX Fuerza", est_adx), ("Divergencia RSI", est_rsi_div),
     ("Stochastic RSI", est_stoch_rsi), ("Bollinger Bands", est_bollinger), ("Patron de Velas", est_velas),
     ("Soporte/Resistencia", est_sr), ("MACD Cruce", est_macd), ("Canal Regresion", est_canal),
@@ -272,7 +332,7 @@ def analizar_activo(simbolo, tipo):
         if df is None or len(df) < 60: continue
         direccion, resultados = analizar_df(df)
         datos[tf], dirs[tf], todos[tf] = df, direccion, resultados
-    tfs_ok = [tf for tf, d in dirs.items() if d is not None]
+    tfs_ok =[tf for tf, d in dirs.items() if d is not None]
     if len(tfs_ok) < 2: return None
     if len(set(dirs[tf] for tf in tfs_ok)) != 1: return None
     direccion_final = list(set(dirs[tf] for tf in tfs_ok))[0]
@@ -282,19 +342,21 @@ def analizar_activo(simbolo, tipo):
 
 def formatear_mensaje(r):
     d, p, todos = r["direccion"], r["posicion"], r["todos"]
-    # Usamos el nombre humano si existe, si no el ticker
     nombre_activo = NOMBRES_HUMANOS.get(r["simbolo"], r["simbolo"])
-    confirmaciones = "\n".join([("✅ " if todos.get(n) == d else ("❌ " if todos.get(n) is not None else "⚪ ")) + n for n, _ in ESTRATEGIAS])
+    
+    # Se reemplaza el círculo blanco problemático por el símbolo de interrogación (?) 
+    confirmaciones = "\n".join([("✅ " if todos.get(n) == d else ("❌ " if todos.get(n) is not None else "❔ ")) + n for n, _ in ESTRATEGIAS])
+    
     icono_dir = "🟢" if d == "COMPRA" else "🔴"
     return (icono_dir + " <b>SENAL DE " + d + " - " + nombre_activo + "</b> " + icono_dir + "\n\n"
             "<b>Activo:</b> " + nombre_activo + " (" + r["tipo"] + ")\n<b>Timeframes OK:</b> " + ", ".join(r["tfs_ok"]) + "\n"
             "<b>TF Entrada:</b> " + r["tf_entrada"].upper() + "\n"
             "━━━━━━━━━━━━━━━━\n"
             "💰 <b>ENTRADA:</b>    " + str(p["entrada"]) + "\n🛑 <b>STOP LOSS:</b> " + str(p["sl"]) + "\n"
-            "🎯 <b>TP1 (40%):</b> " + str(p["tp1"]) + " [1:" + str(TP1_MULT) + "]\n🎯 <b>TP2 (40%):</b> " + str(p["tp2"]) + " [1:" + str(p["rr"]) + "]\n🎯 <b>TP3 (20%):</b> " + str(p["tp3"]) + " [1:" + str(TP3_MULT) + "]\n"
+            "🎯 <b>TP1 (40%):</b> " + str(p["tp1"]) + "[1:" + str(TP1_MULT) + "]\n🎯 <b>TP2 (40%):</b> " + str(p["tp2"]) + " [1:" + str(p["rr"]) + "]\n🎯 <b>TP3 (20%):</b> " + str(p["tp3"]) + "[1:" + str(TP3_MULT) + "]\n"
             "━━━━━━━━━━━━━━━━\n"
             "<b>ADX:</b> " + str(r["adx"]) + " | <b>RSI:</b> " + str(r["rsi"]) + "\n<b>ATR:</b> " + str(p["atr"]) + "\n"
-            "━━━━━━━━━━━━━━━━\n<b>Confirmaciones (9 sistemas):</b>\n"
+            "━━━━━━━━━━━━━━━━\n<b>Confirmaciones (" + str(len(ESTRATEGIAS)) + " sistemas):</b>\n"
             + confirmaciones + "\n━━━━━━━━━━━━━━━━\n"
             "💡 TP1 cierra 40% · TP2 cierra 40% · TP3 cierra 20%\n"
             "🕒 " + r["hora"] + "\n<i>Senal enviada solo cuando TODAS las estrategias coinciden</i>")
