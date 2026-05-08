@@ -28,8 +28,6 @@ ASSETS_MAP = {
     "AUDUSD=X": "AUD/USD", "NZDUSD=X": "NZD/USD", "GC=F": "ORO"
 }
 
-# Diccionario para evitar repetir la misma señal (COMPRA/VENTA) consecutivamente
-# Formato: {"Ticker_Estrategia": "COMPRA"}
 ultima_direccion_enviada = {}
 
 # -------------------------------------------------------------------
@@ -59,7 +57,7 @@ def calc_atr(df, p=14):
     return tr.rolling(p).mean()
 
 # -------------------------------------------------------------------
-# ESTRATEGIAS (LÓGICA IGUAL A LA ANTERIOR)
+# ESTRATEGIAS (CON ICT LIMIT CONFIGURADO)
 # -------------------------------------------------------------------
 def est_alex_ruiz(df_h1, df_h4):
     sma200_h4 = df_h4["close"].rolling(200).mean().iloc[-1]
@@ -68,19 +66,33 @@ def est_alex_ruiz(df_h1, df_h4):
     sma200 = df_h1["close"].rolling(200).mean()
     c, o, l, h = df_h1["close"].iloc[-1], df_h1["open"].iloc[-1], df_h1["low"].iloc[-1], df_h1["high"].iloc[-1]
     if tendencia_h4 == "ALTA" and (c > sma200.iloc[-1] and l <= ema50.iloc[-1] and c > o):
-        return "COMPRA", 1.4, [1.5, 3.0, 5.0]
+        return "COMPRA", 1.4, [1.5, 3.0, 5.0], "MARKET"
     if tendencia_h4 == "BAJA" and (c < sma200.iloc[-1] and h >= ema50.iloc[-1] and c < o):
-        return "VENTA", 1.4, [1.5, 3.0, 5.0]
-    return None, None, None
+        return "VENTA", 1.4, [1.5, 3.0, 5.0], "MARKET"
+    return None, None, None, None
 
 def est_ict_fvg(df_h1, df_h4):
-    h1, l1, h3, l3 = df_h1["high"].iloc[-3], df_h1["low"].iloc[-3], df_h1["high"].iloc[-1], df_h1["low"].iloc[-1]
-    fvg_h1 = "COMPRA" if l3 > h1 else ("VENTA" if h3 < l1 else None)
-    if fvg_h1:
+    # FVG se detecta entre vela 1 y vela 3
+    h1, l1 = df_h1["high"].iloc[-3], df_h1["low"].iloc[-3]
+    h3, l3 = df_h1["high"].iloc[-1], df_h1["low"].iloc[-1]
+    
+    tipo = None
+    precio_entrada = None
+    
+    if l3 > h1: # FVG Alcista
+        tipo = "COMPRA"
+        # Entrada al 50% del Gap (Consecuent Encroachment)
+        precio_entrada = h1 + (l3 - h1) / 2
+    elif h3 < l1: # FVG Bajista
+        tipo = "VENTA"
+        # Entrada al 50% del Gap
+        precio_entrada = l1 - (l1 - h3) / 2
+        
+    if tipo:
         dir_h4 = "COMPRA" if df_h4["close"].iloc[-1] > df_h4["open"].iloc[-1] else "VENTA"
-        if fvg_h1 == dir_h4:
-            return fvg_h1, 2.0, [2.0, 4.0, 6.0]
-    return None, None, None
+        if tipo == dir_h4:
+            return tipo, 2.0, [2.0, 4.0, 6.0], f"<b>ICT limit</b> ({round(precio_entrada, 5)})"
+    return None, None, None, None
 
 def est_bollinger_rsi(df_h1, df_h4):
     m, s = df_h1["close"].rolling(20).mean(), df_h1["close"].rolling(20).std()
@@ -90,15 +102,15 @@ def est_bollinger_rsi(df_h1, df_h4):
     rsi = 100 - (100 / (1 + (g / ps.replace(0, np.nan))))
     rsi4 = (df_h4["close"].diff().clip(lower=0).rolling(14).mean() / df_h4["close"].diff().abs().rolling(14).mean()) * 100
     if df_h1["close"].iloc[-1] < lower.iloc[-1] and rsi.iloc[-1] < 30 and rsi4.iloc[-1] < 50:
-        return "COMPRA", 1.2, [1.2, 2.0, 3.0]
+        return "COMPRA", 1.2, [1.2, 2.0, 3.0], "MARKET"
     if df_h1["close"].iloc[-1] > upper.iloc[-1] and rsi.iloc[-1] > 70 and rsi4.iloc[-1] > 50:
-        return "VENTA", 1.2, [1.2, 2.0, 3.0]
-    return None, None, None
+        return "VENTA", 1.2, [1.2, 2.0, 3.0], "MARKET"
+    return None, None, None, None
 
 MODULOS = [("ALEX RUIZ", est_alex_ruiz), ("ICT FVG", est_ict_fvg), ("BOLLINGER + RSI", est_bollinger_rsi)]
 
 # -------------------------------------------------------------------
-# MOTOR DE EJECUCIÓN (CON FILTRO DE CAMBIO DE VELA Y NO REPETICIÓN)
+# MOTOR DE EJECUCIÓN
 # -------------------------------------------------------------------
 def procesar_activo(ticker, nombre_claro):
     df_h1 = obtener_datos(ticker, "1h")
@@ -107,57 +119,47 @@ def procesar_activo(ticker, nombre_claro):
 
     for nombre_est, func in MODULOS:
         id_unico = f"{ticker}_{nombre_est}"
-        resultado, m_sl, lista_tps = func(df_h1, df_h4)
+        resultado, m_sl, lista_tps, tipo_ejecucion = func(df_h1, df_h4)
         
         if resultado:
-            # FILTRO: No repetir la misma señal si ya está activa
             if ultima_direccion_enviada.get(id_unico) == resultado:
                 continue
 
-            px = df_h1["close"].iloc[-1]
+            px_mercado = df_h1["close"].iloc[-1]
+            # Si es ICT usamos su precio limit, si no, precio de mercado
+            entrada_final = px_mercado if "limit" not in tipo_ejecucion else float(tipo_ejecucion.split("(")[1].split(")")[0])
+            
             atr = calc_atr(df_h1).iloc[-1]
             distancia_sl = atr * m_sl
-            sl = px - distancia_sl if resultado == "COMPRA" else px + distancia_sl
+            sl = entrada_final - distancia_sl if resultado == "COMPRA" else entrada_final + distancia_sl
             
-            tps_finales = [round(px + (distancia_sl * m if resultado == "COMPRA" else -distancia_sl * m), 5) for m in lista_tps]
+            tps_finales = [round(entrada_final + (distancia_sl * m if resultado == "COMPRA" else -distancia_sl * m), 5) for m in lista_tps]
             
-            # Guardamos la dirección para no repetirla
             ultima_direccion_enviada[id_unico] = resultado
             
-            msg = (f"🚀 <b>ESTRATEGIA: {nombre_est}</b>\n"
+            msg = (f"🕒 <b>PRE-CIERRE DE VELA (H1)</b>\n"
+                   f"🚀 <b>ESTRATEGIA: {nombre_est}</b>\n"
                    f"━━━━━━━━━━━━━━━━\n"
                    f"📊 <b>Activo:</b> {nombre_claro}\n"
-                   f"⏱ <b>Vela Confirmada:</b> H1\n"
                    f"📢 <b>Señal:</b> {resultado}\n"
-                   f"💰 <b>Entrada:</b> {round(px, 5)}\n"
+                   f"⚡ <b>Ejecución:</b> {tipo_ejecucion}\n"
                    f"🛑 <b>Stop Loss:</b> {round(sl, 5)}\n"
                    f"━━━━━━━━━━━━━━━━\n"
                    f"🎯 <b>TP 1:</b> {tps_finales[0]}\n"
                    f"🎯 <b>TP 2:</b> {tps_finales[1]}\n"
                    f"🎯 <b>TP 3:</b> {tps_finales[2]}\n"
-                   f"━━━━━━━━━━━━━━━━")
+                   f"━━━━━━━━━━━━━━━━\n"
+                   f"💡 <i>Precio mercado actual: {round(px_mercado, 5)}</i>")
             enviar_telegram(msg)
-        else:
-            # Si la estrategia ya no da señal, permitimos que en el futuro envíe una nueva
-            # Opcional: puedes comentar la línea de abajo si quieres que solo envíe una señal 
-            # de compra y no vuelva a decir nada hasta que sea una venta clara.
-            pass
 
-print("Bot en marcha: Ejecución al cambio de vela (H1) y filtro de duplicados.")
+print("Bot configurado: Disparo a las XX:59:30 con órdenes ICT LIMIT (50% FVG).")
 
 while True:
     ahora = datetime.now(TZ)
-    
-    # LÓGICA DE CAMBIO DE VELA:
-    # Solo procesamos en los primeros 2 minutos de cada hora (ej: 10:00, 11:00...)
     if HORA_INICIO <= ahora.hour < HORA_FIN:
-        if 0 <= ahora.minute <= 2:
-            print(f"[{ahora.strftime('%H:%M')}] Analizando cierre de vela...")
+        if ahora.minute == 59 and 30 <= ahora.second <= 59:
             for ticker, nombre_claro in ASSETS_MAP.items():
                 procesar_activo(ticker, nombre_claro)
-                time.sleep(1)
-            
-            # Dormimos 3 minutos para no repetir el análisis dentro de la misma ventana de apertura
-            time.sleep(180) 
-            
-    time.sleep(30) # Comprobación rápida del reloj
+                time.sleep(0.5)
+            time.sleep(40) 
+    time.sleep(1)
