@@ -17,12 +17,39 @@ HORA_FIN = 22
 COOLDOWN_MINUTOS = 120 
 
 # -------------------------------------------------------------------
-# ACTIVOS CORREGIDOS (QUANTFURY)
+# ACTIVOS CON NOMENCLATURA CLARA
 # -------------------------------------------------------------------
-ASSETS = {
-    "FOREX": ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCAD=X", "USDCHF=X", "AUDUSD=X", "NZDUSD=X"],
-    "CRYPTO_10": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOT-USD", "MATIC-USD", "LTC-USD", "LINK-USD", "AVAX-USD"],
-    "MATERIAS_PRIMAS": ["GC=F", "SI=F", "CL=F", "HG=F", "NG=F"]
+# Diccionario: "Ticker de Yahoo": "Nombre para el Mensaje"
+ASSETS_MAP = {
+    # Índices y Acciones
+    "SPY": "S&P 500",
+    "QQQ": "NASDAQ 100",
+    "^GDAXI": "DAX 40",
+    "NVDA": "NVIDIA",
+    
+    # Criptomonedas (Las 10 principales)
+    "BTC-USD": "BITCOIN",
+    "ETH-USD": "ETHEREUM",
+    "SOL-USD": "SOLANA",
+    "XRP-USD": "XRP",
+    "ADA-USD": "CARDANO",
+    "DOT-USD": "POLKADOT",
+    "MATIC-USD": "POLYGON (MATIC)",
+    "LTC-USD": "LITECOIN",
+    "LINK-USD": "CHAINLINK",
+    "AVAX-USD": "AVALANCHE",
+    
+    # Forex
+    "EURUSD=X": "EUR/USD",
+    "GBPUSD=X": "GBP/USD",
+    "USDJPY=X": "USD/JPY",
+    "USDCAD=X": "USD/CAD",
+    "USDCHF=X": "USD/CHF",
+    "AUDUSD=X": "AUD/USD",
+    "NZDUSD=X": "NZD/USD",
+    
+    # Metales
+    "GC=F": "ORO"
 }
 
 historial_senales = {}
@@ -50,25 +77,20 @@ def calc_atr(df, p=14):
     return tr.rolling(p).mean()
 
 # -------------------------------------------------------------------
-# LAS 3 ESTRATEGIAS INDEPENDIENTES (Parámetros Originales)
+# ESTRATEGIAS INDEPENDIENTES
 # -------------------------------------------------------------------
-
 def est_alex_ruiz(df):
     ema50 = df["close"].ewm(span=50).mean()
     sma200 = df["close"].rolling(200).mean()
     c, o, l, h = df["close"].iloc[-1], df["open"].iloc[-1], df["low"].iloc[-1], df["high"].iloc[-1]
-    if c > sma200.iloc[-1] and l <= ema50.iloc[-1] and c > o:
-        return "COMPRA", 1.4, 1.5
-    if c < sma200.iloc[-1] and h >= ema50.iloc[-1] and c < o:
-        return "VENTA", 1.4, 1.5
+    if c > sma200.iloc[-1] and l <= ema50.iloc[-1] and c > o: return "COMPRA", 1.4, 1.5
+    if c < sma200.iloc[-1] and h >= ema50.iloc[-1] and c < o: return "VENTA", 1.4, 1.5
     return None, None, None
 
 def est_ict_fvg(df):
     h1, l1, h3, l3 = df["high"].iloc[-3], df["low"].iloc[-3], df["high"].iloc[-1], df["low"].iloc[-1]
-    if l3 > h1:
-        return "COMPRA", 2.0, 2.0
-    if h3 < l1:
-        return "VENTA", 2.0, 2.0
+    if l3 > h1: return "COMPRA", 2.0, 2.0
+    if h3 < l1: return "VENTA", 2.0, 2.0
     return None, None, None
 
 def est_bollinger_rsi(df):
@@ -77,10 +99,8 @@ def est_bollinger_rsi(df):
     d = df["close"].diff()
     g, ps = d.clip(lower=0).rolling(14).mean(), (-d.clip(upper=0)).rolling(14).mean()
     rsi = 100 - (100 / (1 + (g / ps.replace(0, np.nan))))
-    if df["close"].iloc[-1] < lower.iloc[-1] and rsi.iloc[-1] < 30:
-        return "COMPRA", 1.2, 2.0
-    if df["close"].iloc[-1] > upper.iloc[-1] and rsi.iloc[-1] > 70:
-        return "VENTA", 1.2, 2.0
+    if df["close"].iloc[-1] < lower.iloc[-1] and rsi.iloc[-1] < 30: return "COMPRA", 1.2, 2.0
+    if df["close"].iloc[-1] > upper.iloc[-1] and rsi.iloc[-1] > 70: return "VENTA", 1.2, 2.0
     return None, None, None
 
 MODULOS_ESTRATEGIA = [
@@ -90,14 +110,14 @@ MODULOS_ESTRATEGIA = [
 ]
 
 # -------------------------------------------------------------------
-# MOTOR DE EJECUCIÓN
+# MOTOR DE PROCESAMIENTO
 # -------------------------------------------------------------------
-def procesar_activo(simbolo):
-    df = obtener_datos(simbolo)
+def procesar_activo(ticker, nombre_claro):
+    df = obtener_datos(ticker)
     if df is None: return
 
     for nombre_est, func in MODULOS_ESTRATEGIA:
-        id_senal = f"{simbolo}_{nombre_est}"
+        id_senal = f"{ticker}_{nombre_est}"
         resultado, m_sl, m_tp = func(df)
         
         if resultado:
@@ -116,21 +136,22 @@ def procesar_activo(simbolo):
             
             msg = (f"🚀 <b>ESTRATEGIA: {nombre_est}</b>\n"
                    f"━━━━━━━━━━━━━━━━\n"
-                   f"📊 <b>Activo:</b> {simbolo}\n"
+                   f"📊 <b>Activo:</b> {nombre_claro}\n"
                    f"📢 <b>Señal:</b> {resultado}\n"
                    f"💰 <b>Precio Entrada:</b> {round(px, 5)}\n"
                    f"🛑 <b>Stop Loss:</b> {round(sl, 5)}\n"
                    f"🎯 <b>Take Profit:</b> {round(tp, 5)}\n"
-                   f"━━━━━━━━━━━━━━━━\n"
-                   f"⏰ <i>Hora: {ahora.strftime('%H:%M:%S')}</i>")
+                   f"━━━━━━━━━━━━━━━━")
             enviar_telegram(msg)
 
-print("Bot Operativo: 10 Cryptos + Forex + Materias Primas Quantfury")
+# -------------------------------------------------------------------
+# BUCLE PRINCIPAL
+# -------------------------------------------------------------------
+print("Bot Activo: Nomenclatura Clara y Estrategias Independientes...")
 while True:
     h = datetime.now(TZ).hour
     if HORA_INICIO <= h < HORA_FIN:
-        for cat in ASSETS:
-            for s in ASSETS[cat]:
-                procesar_activo(s)
-                time.sleep(1)
+        for ticker, nombre_claro in ASSETS_MAP.items():
+            procesar_activo(ticker, nombre_claro)
+            time.sleep(1.5)
     time.sleep(300)
