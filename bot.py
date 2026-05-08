@@ -14,40 +14,48 @@ TZ = pytz.timezone("Europe/Madrid")
 HORA_INICIO = 7
 HORA_FIN = 22
 
-# MAPA COMPLETO CON LAS 10 CRYPTOS + RESTO DE ACTIVOS
 ASSETS_MAP = {
     "BTC-USD": "BITCOIN", "ETH-USD": "ETHEREUM", "SOL-USD": "SOLANA",
     "XRP-USD": "XRP", "ADA-USD": "CARDANO", "DOT-USD": "POLKADOT",
     "MATIC-USD": "POLYGON (MATIC)", "LTC-USD": "LITECOIN", "LINK-USD": "CHAINLINK",
-    "AVAX-USD": "AVALANCHE", # <--- AQUÍ ESTÁN LAS 10 CRYPTOS
+    "AVAX-USD": "AVALANCHE", 
     "SPY": "S&P 500", "QQQ": "NASDAQ 100", "^GDAXI": "DAX 40", "NVDA": "NVIDIA",
     "EURUSD=X": "EUR/USD", "GBPUSD=X": "GBP/USD", "USDJPY=X": "USD/JPY", 
     "USDCAD=X": "USD/CAD", "USDCHF=X": "USD/CHF", "AUDUSD=X": "AUD/USD", 
     "NZDUSD=X": "NZD/USD", "GC=F": "ORO"
 }
 
-ultima_direccion_enviada = {}
+ultima_señal_ict = {}
+ultima_señal_smc = {}
 
 # -------------------------------------------------------------------
-# FORMATO VISUAL LIMPIO (Identificación rápida 🟢/🔴)
+# FORMATO VISUAL TELEGRAM (Con Alertas para GBP/USD)
 # -------------------------------------------------------------------
-def generar_mensaje_telegram(par, direccion, precio_entrada, sl, tp1, tp2, tp3):
+def generar_mensaje_telegram(par, direccion, precio_entrada, sl, tp1, tp2, tp3, nombre_estrategia):
+    # Colores base
     if direccion.upper() == "COMPRA":
         cabecera = "🟢🟢🟢🟢🟢🟢\n🟢 COMPRA 🟢\n🟢🟢🟢🟢🟢🟢"
     else:
         cabecera = "🔴🔴🔴🔴🔴🔴\n🔴 VENTA 🔴\n🔴🔴🔴🔴🔴🔴"
 
+    # ALERTA ESPECIAL PARA GBP/USD
+    if par == "GBP/USD":
+        alerta_par = f"⚠️⚠️⚠️ *¡¡{par}!!* ⚠️⚠️⚠️" # Triángulos y texto muy destacado
+    else:
+        alerta_par = f"📈 *ACTIVO:* `{par}`"
+
     mensaje = (
         f"{cabecera}\n\n"
-        f"📈 *ACTIVO:* `{par}`\n"
-        f"🚀 *ENTRADA:* `ICT Limit ({precio_entrada})`\n"
+        f"🧠 *ESTRATEGIA:* `{nombre_estrategia}`\n"
+        f"{alerta_par}\n" # Aquí se inserta el activo con o sin alerta
+        f"🚀 *ENTRADA:* `Limit ({precio_entrada})`\n"
         f"🛡️ *STOP LOSS:* `{sl}`\n\n"
         f"━━━━━━━━━━━━━━━\n"
         f"🎯 *TARGET 1:* `{tp1}`\n"
         f"🎯 *TARGET 2:* `{tp2}`\n"
         f"🎯 *TARGET 3:* `{tp3}`\n"
         f"━━━━━━━━━━━━━━━\n\n"
-        f"🕒 *CONFIRMACIÓN:* `H4 (Bias) + M15 (OTE)`"
+        f"🕒 *CONFIRMACIÓN:* `H4 + M15`"
     )
     return mensaje
 
@@ -70,93 +78,89 @@ def obtener_datos(simbolo, tf="15m"):
         data = r.json()["chart"]["result"][0]
         timestamps = data["timestamp"]
         q = data["indicators"]["quote"][0]
-        
         df = pd.DataFrame({
             "datetime": pd.to_datetime(timestamps, unit='s', utc=True).tz_convert(TZ),
             "open": q["open"], "high": q["high"], "low": q["low"], "close": q["close"]
         }).dropna()
-        
-        if tf == "4h": 
-            df = df.iloc[::4, :].copy() 
-            
+        if tf == "4h": df = df.iloc[::4, :].copy() 
         return df.tail(200).reset_index(drop=True)
-    except: 
-        return None
+    except: return None
 
 # -------------------------------------------------------------------
-# ESTRATEGIA ICT ALEX RUIZ (Lógica y Fórmulas TP Exactas)
+# ESTRATEGIA 1: ICT ALEX RUIZ (Intacta)
 # -------------------------------------------------------------------
-def est_estrategia_video(df_15m, df_4h):
-    if df_15m is None or df_4h is None or len(df_15m) < 50:
-        return None, None, None, None, None, None
-
-    # 1. Sesgo Semanal (Weekly Open)
+def est_estrategia_ict_alex(df_15m, df_4h):
+    if df_15m is None or df_4h is None or len(df_15m) < 50: return None, None, None, None, None, None
     df_15m['week'] = df_15m['datetime'].dt.isocalendar().week
     current_week = df_15m['week'].iloc[-1]
     week_data = df_15m[df_15m['week'] == current_week]
     if len(week_data) == 0: return None, None, None, None, None, None
-    
     weekly_open = week_data['open'].iloc[0]
     current_price = df_15m['close'].iloc[-1]
     
-    # 2. Confirmación de Tendencia 4H
     h4_h1, h4_l1 = df_4h['high'].iloc[-1], df_4h['low'].iloc[-1]
     h4_h2, h4_l2 = df_4h['high'].iloc[-2], df_4h['low'].iloc[-2]
     h4_trend = "COMPRA" if (h4_h1 > h4_h2 and h4_l1 > h4_l2) else "VENTA" if (h4_h1 < h4_h2 and h4_l1 < h4_l2) else None
     
-    # 3. Alineación: Precio vs Open + Tendencia H4
     bias = "COMPRA" if (current_price < weekly_open and h4_trend == "COMPRA") else "VENTA" if (current_price > weekly_open and h4_trend == "VENTA") else None
     if not bias: return None, None, None, None, None, None
 
-    # 4. Fibonacci OTE (0.62 - 0.79) en M15
     lookback = 30
-    recent_high_idx = df_15m['high'].tail(lookback).idxmax()
-    recent_low_idx = df_15m['low'].tail(lookback).idxmin()
+    recent_high_idx, recent_low_idx = df_15m['high'].tail(lookback).idxmax(), df_15m['low'].tail(lookback).idxmin()
     recent_high, recent_low = df_15m['high'].loc[recent_high_idx], df_15m['low'].loc[recent_low_idx]
     rango = recent_high - recent_low
     if rango <= 0: return None, None, None, None, None, None
 
-    # FÓRMULAS TP EXACTAS DE ALEX RUIZ
     if bias == "COMPRA" and recent_low_idx < recent_high_idx:
-        ote_inf, ote_sup = recent_high - (rango * 0.79), recent_high - (rango * 0.62)
-        if ote_inf <= current_price <= ote_sup:
-            return "COMPRA", round(current_price, 5), round(recent_low, 5), \
-                   round(recent_high, 5), \
-                   round(recent_high + (rango * 0.272), 5), \
-                   round(recent_high + (rango * 0.618), 5)
-                
+        if (recent_high - (rango * 0.79)) <= current_price <= (recent_high - (rango * 0.62)):
+            return "COMPRA", round(current_price, 5), round(recent_low, 5), round(recent_high, 5), round(recent_high + (rango * 0.272), 5), round(recent_high + (rango * 0.618), 5)
     elif bias == "VENTA" and recent_high_idx < recent_low_idx:
-        ote_inf, ote_sup = recent_low + (rango * 0.62), recent_low + (rango * 0.79)
-        if ote_inf <= current_price <= ote_sup:
-            return "VENTA", round(current_price, 5), round(recent_high, 5), \
-                   round(recent_low, 5), \
-                   round(recent_low - (rango * 0.272), 5), \
-                   round(recent_low - (rango * 0.618), 5)
-
+        if (recent_low + (rango * 0.62)) <= current_price <= (recent_low + (rango * 0.79)):
+            return "VENTA", round(current_price, 5), round(recent_high, 5), round(recent_low, 5), round(recent_low - (rango * 0.272), 5), round(recent_low - (rango * 0.618), 5)
     return None, None, None, None, None, None
 
 # -------------------------------------------------------------------
-# MOTOR DE PROCESAMIENTO
+# ESTRATEGIA 2: SMC (SMART MONEY CONCEPTS)
+# -------------------------------------------------------------------
+def est_estrategia_smc(df):
+    # ========================================================
+    # 👇 AQUÍ VA TU ESTRATEGIA SMC ANTERIOR 👇
+    # Pega aquí el código que tenías para calcular la SMC
+    # Debe retornar: direccion, entrada, sl, tp1, tp2, tp3
+    # ========================================================
+    
+    return None, None, None, None, None, None
+
+# -------------------------------------------------------------------
+# MOTOR DE PROCESAMIENTO DUAL
 # -------------------------------------------------------------------
 def procesar_activo(ticker, nombre_claro):
     df_15m = obtener_datos(ticker, "15m")
     df_4h = obtener_datos(ticker, "4h")
     if df_15m is None or df_4h is None: return
 
-    res = est_estrategia_video(df_15m, df_4h)
-    if not res[0]: return 
+    # 1. EVALUAR ESTRATEGIA ICT
+    res_ict = est_estrategia_ict_alex(df_15m, df_4h)
+    if res_ict[0]:
+        dir, ent, sl, tp1, tp2, tp3 = res_ict
+        id_ref = f"{ticker}_{dir}_{ent}"
+        if ultima_señal_ict.get(ticker) != id_ref:
+            enviar_telegram(generar_mensaje_telegram(nombre_claro, dir, ent, sl, tp1, tp2, tp3, "ICT Alex Ruiz"))
+            ultima_señal_ict[ticker] = id_ref
 
-    dir, ent, sl, tp1, tp2, tp3 = res
-    id_ref = f"{ticker}_{dir}_{ent}"
-    if ultima_direccion_enviada.get(ticker) == id_ref: return
-
-    enviar_telegram(generar_mensaje_telegram(nombre_claro, dir, ent, sl, tp1, tp2, tp3))
-    ultima_direccion_enviada[ticker] = id_ref
+    # 2. EVALUAR ESTRATEGIA SMC
+    res_smc = est_estrategia_smc(df_15m)  # Pásale los datos que requiera tu SMC
+    if res_smc[0]:
+        dir, ent, sl, tp1, tp2, tp3 = res_smc
+        id_ref = f"{ticker}_{dir}_{ent}"
+        if ultima_señal_smc.get(ticker) != id_ref:
+            enviar_telegram(generar_mensaje_telegram(nombre_claro, dir, ent, sl, tp1, tp2, tp3, "SMC (Smart Money)"))
+            ultima_señal_smc[ticker] = id_ref
 
 # -------------------------------------------------------------------
 # BUCLE PRINCIPAL
 # -------------------------------------------------------------------
-print("Bot Sincronizado: 10 Cryptos + Activos cargados. Estrategia Alex Ruiz activa.")
+print("Bot Sincronizado: Estrategia Dual (ICT + SMC) activa. Alertas configuradas para GBP/USD.")
 while True:
     ahora = datetime.now(TZ)
     if HORA_INICIO <= ahora.hour < HORA_FIN:
