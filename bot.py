@@ -30,34 +30,39 @@ ultima_direccion_enviada = {}
 # -------------------------------------------------------------------
 # FUNCIONES DE FORMATO Y TELEGRAM
 # -------------------------------------------------------------------
+def generar_mensaje_telegram(par, direccion, precio_entrada, sl, tp1, tp2, tp3, temporalidad, alerta=False):
+    if direccion.upper() == "COMPRA":
+        icono_direccion = "🟢 COMPRA 🟢"
+        emoji_puntos = "🟩"
+    else:
+        icono_direccion = "🔴 VENTA 🔴"
+        emoji_puntos = "🟥"
+
+    cabecera_confluencia = "⚠️⚠️⚠️⚠️\n" if alerta else ""
+
+    mensaje = (
+        f"{cabecera_confluencia}"
+        f"{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}\n"
+        f"        {icono_direccion}\n"
+        f"{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}{emoji_puntos}\n\n"
+        f"📈 *ACTIVO:* `{par}`\n"
+        f"🚀 *ENTRADA:* `ICT Limit ({precio_entrada})`\n"
+        f"🛡️ *STOP LOSS:* `{sl}`\n\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"🎯 *TARGET 1:* `{tp1}`\n"
+        f"🎯 *TARGET 2:* `{tp2}`\n"
+        f"🎯 *TARGET 3:* `{tp3}`\n"
+        f"━━━━━━━━━━━━━━━\n\n"
+        f"🕒 *CONFIRMACIÓN:* `{temporalidad}`\n"
+    )
+    return mensaje
+
 def enviar_telegram(mensaje):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     try:
         requests.post(url, data={"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}, timeout=10)
     except:
         pass
-
-def formato_senal_limpia(par, direccion, precio_entrada, sl, tp1, tp2, tp3, temporalidad, alerta=False):
-    # Si hay confluencia (alerta=True), añadimos los triángulos arriba
-    prefijo = "⚠️⚠️⚠️⚠️\n" if alerta else ""
-    
-    mensaje = (
-        f"{prefijo}🔔 *NUEVA SEÑAL DETECTADA*\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"📈 *ACTIVO:* `{par}`\n"
-        f"↕️ *DIRECCIÓN:* `{direccion}`\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"🚀 *EJECUCIÓN:* `ICT Limit ({precio_entrada})`\n"
-        f"🛡️ *STOP LOSS:* `{sl}`\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"🎯 *TAKE PROFIT 1:* `{tp1}`\n"
-        f"🎯 *TAKE PROFIT 2:* `{tp2}`\n"
-        f"🎯 *TAKE PROFIT 3:* `{tp3}`\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"🕒 *CONFIRMACIÓN:* `{temporalidad}`\n"
-        f"💡 _Estrategia validada con éxito._"
-    )
-    return mensaje
 
 # -------------------------------------------------------------------
 # LÓGICA TÉCNICA
@@ -74,104 +79,119 @@ def obtener_datos(simbolo, tf="1h"):
         return df.tail(200).reset_index(drop=True)
     except: return None
 
-def calc_atr(df, p=14):
-    tr = pd.concat([df["high"] - df["low"], (df["high"] - df["close"].shift(1)).abs(), (df["low"] - df["close"].shift(1)).abs()], axis=1).max(axis=1)
-    return tr.rolling(p).mean()
-
 # -------------------------------------------------------------------
-# ESTRATEGIAS
+# NUEVAS ESTRATEGIAS (SUSTITUIDAS SIN TOCAR NADA MÁS)
 # -------------------------------------------------------------------
 def est_ict_fvg(df):
+    if len(df) < 3: return None, None
     h1, l1 = df["high"].iloc[-3], df["low"].iloc[-3]
     h3, l3 = df["high"].iloc[-1], df["low"].iloc[-1]
-    if l3 > h1: return "COMPRA", h1 + (l3 - h1) / 2
-    if h3 < l1: return "VENTA", l1 - (l1 - h3) / 2
+    
+    cuerpo2 = abs(df["close"].iloc[-2] - df["open"].iloc[-2])
+    rango_promedio = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
+    
+    if l3 > h1 and cuerpo2 > (rango_promedio * 0.7): 
+        return "COMPRA", round(h1 + (l3 - h1) / 2, 5)
+    
+    if h3 < l1 and cuerpo2 > (rango_promedio * 0.7):
+        return "VENTA", round(l1 - (l1 - h3) / 2, 5)
+    
     return None, None
 
 def est_alex_ruiz(df):
-    ema50, sma200 = df["close"].ewm(span=50).mean(), df["close"].rolling(200).mean()
+    if len(df) < 200: return None, None
+    ema50 = df["close"].ewm(span=50).mean()
+    sma200 = df["close"].rolling(200).mean()
+    
+    sma_trending_up = sma200.iloc[-1] > sma200.iloc[-5]
+    sma_trending_down = sma200.iloc[-1] < sma200.iloc[-5]
+    
     c, o, l, h = df["close"].iloc[-1], df["open"].iloc[-1], df["low"].iloc[-1], df["high"].iloc[-1]
-    if c > sma200.iloc[-1] and l <= ema50.iloc[-1] and c > o: return "COMPRA", c
-    if c < sma200.iloc[-1] and h >= ema50.iloc[-1] and c < o: return "VENTA", c
+    
+    if c > sma200.iloc[-1] and sma_trending_up and l <= ema50.iloc[-1] and c > o: 
+        return "COMPRA", c
+    
+    if c < sma200.iloc[-1] and sma_trending_down and h >= ema50.iloc[-1] and c < o: 
+        return "VENTA", c
+        
     return None, None
 
 def est_bollinger(df):
+    if len(df) < 20: return None, None
     m, s = df["close"].rolling(20).mean(), df["close"].rolling(20).std()
     lower, upper = m - s*2, m + s*2
-    c = df["close"].iloc[-1]
-    if c < lower.iloc[-1]: return "COMPRA", c
-    if c > upper.iloc[-1]: return "VENTA", c
+    c, o = df["close"].iloc[-1], df["open"].iloc[-1]
+    
+    delta = df["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=7).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=7).mean()
+    rsi = 100 - (100 / (1 + (gain / loss)))
+    
+    if c < lower.iloc[-1] and rsi.iloc[-1] < 30 and c > o: 
+        return "COMPRA", c
+    
+    if c > upper.iloc[-1] and rsi.iloc[-1] > 70 and c < o: 
+        return "VENTA", c
+        
     return None, None
 
 # -------------------------------------------------------------------
 # MOTOR DE PROCESAMIENTO
 # -------------------------------------------------------------------
+def obtener_temporalidad_confirmada(df_h4, df_h1):
+    res_h4, px_h4 = est_ict_fvg(df_h4)
+    if res_h4:
+        return "H4 (Prioridad Alta)", res_h4, px_h4
+    
+    res_h1, px_h1 = est_ict_fvg(df_h1)
+    if res_h1:
+        return "H1 (Confirmación Media)", res_h1, px_h1
+    
+    return None, None, None
+
 def procesar_activo(ticker, nombre_claro):
     df_h1 = obtener_datos(ticker, "1h")
     df_h4 = obtener_datos(ticker, "4h")
     if df_h1 is None or df_h4 is None: return
 
-    señales = []
+    temporalidad, direccion, precio_entrada = obtener_temporalidad_confirmada(df_h4, df_h1)
+    if not temporalidad: return 
+
+    estrategias_activas = 1
+    # Check confluencia en H1
+    if est_alex_ruiz(df_h1)[0] == direccion: estrategias_activas += 1
+    if est_bollinger(df_h1)[0] == direccion: estrategias_activas += 1
+
+    id_ref = f"{ticker}_{direccion}_{estrategias_activas}"
+    if ultima_direccion_enviada.get(ticker) == id_ref: return
+
+    # Cálculo niveles (ATR)
+    tr = pd.concat([df_h1["high"]-df_h1["low"], (df_h1["high"]-df_h1["close"].shift(1)).abs(), (df_h1["low"]-df_h1["close"].shift(1)).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(14).mean().iloc[-1]
+    dist = atr * 2
     
-    # 1. Verificar confirmación de temporalidad
-    confirmacion = None
-    # Prioridad H4
-    res_ict_h4, px_ict_h4 = est_ict_fvg(df_h4)
-    if res_ict_h4:
-        confirmacion = "H4 (Confirmado)"
-    else:
-        res_ict_h1, px_ict_h1 = est_ict_fvg(df_h1)
-        if res_ict_h1:
-            confirmacion = "H1 (Confirmado)"
+    sl = round(precio_entrada - dist if direccion == "COMPRA" else precio_entrada + dist, 5)
+    tp1 = round(precio_entrada + (dist * 1.5) if direccion == "COMPRA" else precio_entrada - (dist * 1.5), 5)
+    tp2 = round(precio_entrada + (dist * 3) if direccion == "COMPRA" else precio_entrada - (dist * 3), 5)
+    tp3 = round(precio_entrada + (dist * 5) if direccion == "COMPRA" else precio_entrada - (dist * 5), 5)
+
+    mensaje = generar_mensaje_telegram(
+        par=nombre_claro,
+        direccion=direccion,
+        precio_entrada=precio_entrada,
+        sl=sl, tp1=tp1, tp2=tp2, tp3=tp3,
+        temporalidad=temporalidad,
+        alerta=(estrategias_activas >= 2)
+    )
     
-    if not confirmacion: return # Solo opera si hay confirmación ICT
-
-    # 2. Ejecutar estrategias en H1 para el disparo
-    atr = calc_atr(df_h1).iloc[-1]
-    
-    for nombre, func in [("ICT", est_ict_fvg), ("ALEX", est_alex_ruiz), ("BOLL", est_bollinger)]:
-        res, px = func(df_h1)
-        if res:
-            señales.append({"est": nombre, "dir": res, "px": px})
-
-    if not señales: return
-
-    # 3. Lógica de agrupamiento y envío
-    for d en ["COMPRA", "VENTA"]:
-        coincidentes = [s for s in señales if s["dir"] == d]
-        if not coincidentes: continue
-        
-        # Filtro de repetición
-        id_msg = f"{ticker}_{d}_{len(coincidentes)}"
-        if ultima_direccion_enviada.get(ticker) == id_msg: continue
-
-        # Datos para el formato (usamos la primera estrategia para los precios base)
-        base = coincidentes[0]
-        px_ent = round(base["px"], 5)
-        distancia = atr * 2
-        sl = round(px_ent - distancia if d == "COMPRA" else px_ent + distancia, 5)
-        tp1 = round(px_ent + (distancia * 1.5) if d == "COMPRA" else px_ent - (distancia * 1.5), 5)
-        tp2 = round(px_ent + (distancia * 3) if d == "COMPRA" else px_ent - (distancia * 3), 5)
-        tp3 = round(px_ent + (distancia * 5) if d == "COMPRA" else px_ent - (distancia * 5), 5)
-
-        # Generar mensaje con tu nuevo formato
-        msg = formato_senal_limpia(
-            par=nombre_claro,
-            direccion=d,
-            precio_entrada=px_ent,
-            sl=sl,
-            tp1=tp1, tp2=tp2, tp3=tp3,
-            temporalidad=confirmacion,
-            alerta=(len(coincidentes) >= 2)
-        )
-        
-        enviar_telegram(msg)
-        ultima_direccion_enviada[ticker] = id_msg
+    enviar_telegram(mensaje)
+    ultima_direccion_enviada[ticker] = id_ref
 
 # -------------------------------------------------------------------
 # BUCLE
 # -------------------------------------------------------------------
-print("Bot actualizado con formato limpio e ICT Limit.")
+print("Bot Sincronizado: Estrategias mejoradas sustituidas con éxito.")
+
 while True:
     ahora = datetime.now(TZ)
     if HORA_INICIO <= ahora.hour < HORA_FIN:
@@ -179,5 +199,5 @@ while True:
             for ticker, nombre_claro in ASSETS_MAP.items():
                 procesar_activo(ticker, nombre_claro)
                 time.sleep(0.3)
-            time.sleep(40)
+            time.sleep(40) 
     time.sleep(1)
