@@ -29,25 +29,23 @@ ultima_señal_ict = {}
 ultima_señal_smc = {}
 
 # -------------------------------------------------------------------
-# FORMATO VISUAL TELEGRAM (Con Alertas para GBP/USD)
+# FORMATO VISUAL TELEGRAM
 # -------------------------------------------------------------------
 def generar_mensaje_telegram(par, direccion, precio_entrada, sl, tp1, tp2, tp3, nombre_estrategia):
-    # Colores base
     if direccion.upper() == "COMPRA":
         cabecera = "🟢🟢🟢🟢🟢🟢\n🟢 COMPRA 🟢\n🟢🟢🟢🟢🟢🟢"
     else:
         cabecera = "🔴🔴🔴🔴🔴🔴\n🔴 VENTA 🔴\n🔴🔴🔴🔴🔴🔴"
 
-    # ALERTA ESPECIAL PARA GBP/USD
     if par == "GBP/USD":
-        alerta_par = f"⚠️⚠️⚠️ *¡¡{par}!!* ⚠️⚠️⚠️" # Triángulos y texto muy destacado
+        alerta_par = f"⚠️⚠️⚠️ *¡¡{par}!!* ⚠️⚠️⚠️"
     else:
         alerta_par = f"📈 *ACTIVO:* `{par}`"
 
     mensaje = (
         f"{cabecera}\n\n"
         f"🧠 *ESTRATEGIA:* `{nombre_estrategia}`\n"
-        f"{alerta_par}\n" # Aquí se inserta el activo con o sin alerta
+        f"{alerta_par}\n"
         f"🚀 *ENTRADA:* `Limit ({precio_entrada})`\n"
         f"🛡️ *STOP LOSS:* `{sl}`\n\n"
         f"━━━━━━━━━━━━━━━\n"
@@ -87,7 +85,7 @@ def obtener_datos(simbolo, tf="15m"):
     except: return None
 
 # -------------------------------------------------------------------
-# ESTRATEGIA 1: ICT ALEX RUIZ (Intacta)
+# ESTRATEGIA 1: ICT ALEX RUIZ 
 # -------------------------------------------------------------------
 def est_estrategia_ict_alex(df_15m, df_4h):
     if df_15m is None or df_4h is None or len(df_15m) < 50: return None, None, None, None, None, None
@@ -120,26 +118,21 @@ def est_estrategia_ict_alex(df_15m, df_4h):
     return None, None, None, None, None, None
 
 # -------------------------------------------------------------------
-# ESTRATEGIA 2: SMC (SMART MONEY CONCEPTS)
+# ESTRATEGIA 2: SMC 
 # -------------------------------------------------------------------
 def est_estrategia_smc(df):
-    # ========================================================
     # 👇 AQUÍ VA TU ESTRATEGIA SMC ANTERIOR 👇
-    # Pega aquí el código que tenías para calcular la SMC
-    # Debe retornar: direccion, entrada, sl, tp1, tp2, tp3
-    # ========================================================
     
     return None, None, None, None, None, None
 
 # -------------------------------------------------------------------
-# MOTOR DE PROCESAMIENTO DUAL
+# MOTOR DE PROCESAMIENTO
 # -------------------------------------------------------------------
 def procesar_activo(ticker, nombre_claro):
     df_15m = obtener_datos(ticker, "15m")
     df_4h = obtener_datos(ticker, "4h")
     if df_15m is None or df_4h is None: return
 
-    # 1. EVALUAR ESTRATEGIA ICT
     res_ict = est_estrategia_ict_alex(df_15m, df_4h)
     if res_ict[0]:
         dir, ent, sl, tp1, tp2, tp3 = res_ict
@@ -148,8 +141,7 @@ def procesar_activo(ticker, nombre_claro):
             enviar_telegram(generar_mensaje_telegram(nombre_claro, dir, ent, sl, tp1, tp2, tp3, "ICT Alex Ruiz"))
             ultima_señal_ict[ticker] = id_ref
 
-    # 2. EVALUAR ESTRATEGIA SMC
-    res_smc = est_estrategia_smc(df_15m)  # Pásale los datos que requiera tu SMC
+    res_smc = est_estrategia_smc(df_15m)  
     if res_smc[0]:
         dir, ent, sl, tp1, tp2, tp3 = res_smc
         id_ref = f"{ticker}_{dir}_{ent}"
@@ -158,15 +150,22 @@ def procesar_activo(ticker, nombre_claro):
             ultima_señal_smc[ticker] = id_ref
 
 # -------------------------------------------------------------------
-# BUCLE PRINCIPAL
+# BUCLE PRINCIPAL (CON HORARIO HÍBRIDO)
 # -------------------------------------------------------------------
-print("Bot Sincronizado: Estrategia Dual (ICT + SMC) activa. Alertas configuradas para GBP/USD.")
+print("Bot Activo: Forex/Índices (07h-22h) | Cryptos (24/7)")
 while True:
     ahora = datetime.now(TZ)
-    if HORA_INICIO <= ahora.hour < HORA_FIN:
-        if ahora.minute in [14, 29, 44, 59] and ahora.second == 30:
-            for ticker, nombre in ASSETS_MAP.items():
+    # Entra en los minutos de cierre de vela M15
+    if ahora.minute in [14, 29, 44, 59] and ahora.second == 30:
+        for ticker, nombre in ASSETS_MAP.items():
+            
+            # Comprobación mágica: ¿Es una Crypto? (Todos los tickers crypto terminan en "-USD")
+            es_crypto = "-USD" in ticker
+            
+            # Opera si es crypto (siempre) O si es horario de Forex/Indices
+            if es_crypto or (HORA_INICIO <= ahora.hour < HORA_FIN):
                 procesar_activo(ticker, nombre)
                 time.sleep(0.3)
-            time.sleep(40)
+                
+        time.sleep(40) # Espera para no repetir el bucle en el mismo minuto
     time.sleep(1)
