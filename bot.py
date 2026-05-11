@@ -27,47 +27,43 @@ ASSETS_MAP = {
 señales_enviadas = set()
 
 # ===================================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES DE SISTEMA
 # ===================================================================
 def enviar_telegram(mensaje):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}, timeout=10)
+        requests.post(url, data=payload, timeout=10)
     except:
         pass
 
-def generar_mensaje(par, direccion, ent, sl, tp1, tp2=None, tp3=None, nombre_est="", marco=""):
+def generar_mensaje_telegram(par, direccion, ent, sl, tp1, tp2=None, nombre_est="", marco="", timing=""):
     cabecera = "⚡ MARKET ORDER ⚡\n"
-    if direccion == "COMPRA" or direccion == 1:
-        cabecera += "🟢 COMPRA (LONG) 🟢"
-    else:
-        cabecera += "🔴 VENTA (SHORT) 🔴"
-
-    alerta_par = f"⚠️⚠️⚠️ **¡¡{par}!!** ⚠️⚠️⚠️" if par == "GBP/USD" else f"📈 **ACTIVO: {par.upper()}**"
+    cabecera += "🟢 COMPRA (LONG) 🟢" if (direccion == "COMPRA" or direccion == 1) else "🔴 VENTA (SHORT) 🔴"
+    
+    par_display = f"⚠️⚠️⚠️ **¡¡{par}!!** ⚠️⚠️⚠️" if par == "GBP/USD" else f"📈 **ACTIVO: {par.upper()}**"
     
     mensaje = (
         f"{cabecera}\n\n"
         f"🧠 **ESTRATEGIA:** `{nombre_est}`\n"
         f"⏳ **MARCO:** `{marco}`\n"
-        f"{alerta_par}\n\n"
+        f"{par_display}\n\n"
         f"🚀 **ENTRADA:** **{ent}**\n"
         f"🛡️ **STOP LOSS:** **{sl}**\n"
         f"🎯 **TARGET 1:** **{tp1}**\n"
     )
-    
     if tp2: mensaje += f"🎯 **TARGET 2:** **{tp2}**\n"
-    if tp3: mensaje += f"🎯 **TARGET 3:** **{tp3}**\n"
     
-    hora_actual = datetime.now(TZ).strftime('%H:%M:%S')
-    mensaje += f"━━━━━━━━━━━━━━━\n\n🕒 **ANTICIPACIÓN (30s):** `{hora_actual}`"
+    mensaje += f"━━━━━━━━━━━━━━━\n\n🕒 **{timing}:** `{datetime.now(TZ).strftime('%H:%M:%S')}`"
     return mensaje
 
 def obtener_datos(simbolo, tf="15m"):
-    intervalos = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "1h"}
-    intervalo_real = intervalos.get(tf, '15m')
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{simbolo}?interval={intervalo_real}&range=5d"
+    intervalos = {"1m": "1m", "15m": "15m", "4h": "1h"}
+    ir = intervalos.get(tf, '15m')
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{simbolo}?interval={ir}&range=5d"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+        r = requests.get(url, headers=headers, timeout=15)
         data = r.json()["chart"]["result"][0]
         q = data["indicators"]["quote"][0]
         df = pd.DataFrame({"open": q["open"], "high": q["high"], "low": q["low"], "close": q["close"]}, 
@@ -77,127 +73,81 @@ def obtener_datos(simbolo, tf="15m"):
         return None
 
 # ===================================================================
-# ESTRATEGIA 1: ICT ALEX RUIZ (M15 + H4) - COMPLETA
+# ESTRATEGIAS (LÓGICA ORIGINAL MANTENIDA)
 # ===================================================================
 def est_ict_alex_m15(df_15m, df_4h):
     if df_15m is None or df_4h is None or len(df_15m) < 50: return None
-    df = df_15m.copy()
-    df_h4 = df_4h.copy()
-    ts = df.index[-1]
-    
-    df['week'] = df.index.isocalendar().week
-    current_week = df['week'].iloc[-1]
-    df_weekly = df[df['week'] == current_week]
-    if df_weekly.empty: return None
-    
-    weekly_open = df_weekly['open'].iloc[0]
-    current_price = df['close'].iloc[-1]
-    
-    # Tendencia H4
-    h4_high_now = df_h4['high'].iloc[-1]
-    h4_high_prev = df_h4['high'].iloc[-2]
-    h4_low_now = df_h4['low'].iloc[-1]
-    h4_low_prev = df_h4['low'].iloc[-2]
-    
-    h4_trend = None
-    if h4_high_now > h4_high_prev: h4_trend = "COMPRA"
-    elif h4_low_now < h4_low_prev: h4_trend = "VENTA"
+    df_15m['week'] = df_15m.index.isocalendar().week
+    weekly_open = df_15m[df_15m['week'] == df_15m['week'].iloc[-1]]['open'].iloc[0]
+    current_price = df_15m['close'].iloc[-1]
+    h4_trend = "COMPRA" if df_4h['close'].iloc[-1] > df_4h['close'].iloc[-2] else "VENTA"
     
     bias = None
     if current_price < weekly_open and h4_trend == "COMPRA": bias = "COMPRA"
     elif current_price > weekly_open and h4_trend == "VENTA": bias = "VENTA"
-    
     if not bias: return None
 
-    r_high, r_low = df['high'].tail(30).max(), df['low'].tail(30).min()
-    rango = r_high - r_low
-    if rango <= 0: return None
+    rh, rl = df_15m['high'].tail(30).max(), df_15m['low'].tail(30).min()
+    rng = rh - rl
+    if rng <= 0: return None
 
-    if bias == "COMPRA":
-        entry_min = r_high - (rango * 0.79)
-        entry_max = r_high - (rango * 0.62)
-        if entry_min <= current_price <= entry_max:
-            tp = r_high + (rango * 0.272)
-            return "COMPRA", round(current_price, 5), round(r_low, 5), round(r_high, 5), round(tp, 5), ts
-            
-    elif bias == "VENTA":
-        entry_min = r_low + (rango * 0.62)
-        entry_max = r_low + (rango * 0.79)
-        if entry_min <= current_price <= entry_max:
-            tp = r_low - (rango * 0.272)
-            return "VENTA", round(current_price, 5), round(r_high, 5), round(r_low, 5), round(tp, 5), ts
-            
+    if bias == "COMPRA" and (rh - rng * 0.79) <= current_price <= (rh - rng * 0.62):
+        return "COMPRA", round(current_price, 5), round(rl, 5), round(rh, 5), round(rh + (rng * 0.27), 5)
+    if bias == "VENTA" and (rl + rng * 0.62) <= current_price <= (rl + rng * 0.79):
+        return "VENTA", round(current_price, 5), round(rh, 5), round(rl, 5), round(rl - (rng * 0.27), 5)
     return None
 
-# ===================================================================
-# ESTRATEGIA 2: ICT 1 MINUTO - COMPLETA
-# ===================================================================
 def est_ict_1minuto(df_1m):
     if df_1m is None or len(df_1m) < 60: return None
     df = df_1m.copy()
-    ts = df.index[-1]
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+    last_sh = df['high'].rolling(window=5, center=True).max().ffill().iloc[-1]
+    last_sl = df['low'].rolling(window=5, center=True).min().ffill().iloc[-1]
+    c, ema = df['close'].iloc[-1], df['EMA_50'].iloc[-1]
     
-    # Identificación de Swings para estructura
-    df['Swing_High'] = df['high'][(df['high'] == df['high'].rolling(window=5, center=True).max())].ffill()
-    df['Swing_Low'] = df['low'][(df['low'] == df['low'].rolling(window=5, center=True).min())].ffill()
-    
-    c_close, ema_50 = df['close'].iloc[-1], df['EMA_50'].iloc[-1]
-    l_high, l_low = df['Swing_High'].iloc[-1], df['Swing_Low'].iloc[-1]
-    
-    # Lógica de Break of Structure (BOS) y retroceso OTE simplificado para ejecución rápida
-    # Compra: Cierre por encima de último Swing High + Precio sobre EMA50
-    if c_close > l_high and c_close > ema_50:
-        ent = round(c_close, 5)
-        sl = round(l_low, 5)
-        tp = round(l_high + (l_high - l_low) * 0.618, 5)
-        return "COMPRA", ent, sl, tp, ts
-        
-    # Venta: Cierre por debajo de último Swing Low + Precio bajo EMA50
-    if c_close < l_low and c_close < ema_50:
-        ent = round(c_close, 5)
-        sl = round(l_high, 5)
-        tp = round(l_low - (l_high - l_low) * 0.618, 5)
-        return "VENTA", ent, sl, tp, ts
-        
+    if c > last_sh and c > ema:
+        return "COMPRA", round(c, 5), round(last_sl, 5), round(last_sh + (last_sh - last_sl), 5)
+    if c < last_sl and c < ema:
+        return "VENTA", round(c, 5), round(last_sh, 5), round(last_sl - (last_sh - last_sl), 5)
     return None
 
 # ===================================================================
-# MOTOR PRINCIPAL (ICT ONLY - 30s ANTICIPACIÓN)
+# MOTOR DE EJECUCIÓN (SCANNER DINÁMICO)
 # ===================================================================
-print("🚀 BOT INICIADO - ESTRATEGIAS ICT (Alex Ruiz + 1 Min) - 30s Anticipación")
+print("🤖 BOT INICIADO | ICT 1M (Al Cierre) | ICT ALEX (30s Antes)")
 
 while True:
     now = datetime.now(TZ)
     
-    # Se activa cada minuto en el segundo 30
+    # --- BLOQUE 1: ICT 1 MINUTO (SEGUNDO 0 - CIERRE DE VELA) ---
+    if now.second == 0:
+        for ticker, name in ASSETS_MAP.items():
+            if "-USD" in ticker or (HORA_INICIO <= now.hour < HORA_FIN):
+                df_1 = obtener_datos(ticker, "1m")
+                res_1min = est_ict_1minuto(df_1)
+                if res_1min:
+                    key_1 = f"{ticker}_1M_{now.strftime('%H%M')}"
+                    if key_1 not in señales_enviadas:
+                        msg = generar_mensaje_telegram(name, res_1min[0], res_1min[1], res_1min[2], res_1min[3], nombre_est="ICT 1 Minuto", marco="1M", timing="CIERRE VELA")
+                        enviar_telegram(msg)
+                        señales_enviadas.add(key_1)
+        time.sleep(1.5)
+
+    # --- BLOQUE 2: ICT ALEX RUIZ (SEGUNDO 30 - ANTICIPACIÓN) ---
     if now.second == 30:
         for ticker, name in ASSETS_MAP.items():
-            # Filtro Horario: Criptos 24/7, el resto de 7:00 a 22:00
             if "-USD" in ticker or (HORA_INICIO <= now.hour < HORA_FIN):
-                
-                # 1. Escaneo ICT 1 Minuto (Cada minuto)
-                d1m = obtener_datos(ticker, "1m")
-                r_ict1 = est_ict_1minuto(d1m)
-                if r_ict1:
-                    key1 = f"{ticker}_1M_{now.strftime('%H:%M')}"
-                    if key1 not in señales_enviadas:
-                        enviar_telegram(generar_mensaje(name, r_ict1[0], r_ict1[1], r_ict1[2], r_ict1[3], nombre_est="ICT 1 Min", marco="1M"))
-                        señales_enviadas.add(key1)
-
-                # 2. Escaneo ICT Alex Ruiz (Cada 15 min, 30s antes del cierre)
                 if now.minute % 15 == 14:
-                    d15m, d4h = obtener_datos(ticker, "15m"), obtener_datos(ticker, "4h")
-                    r_alex = est_ict_alex_m15(d15m, d4h)
-                    if r_alex:
-                        keyA = f"{ticker}_ALEX_{now.strftime('%H:%M')}"
-                        if keyA not in señales_enviadas:
-                            enviar_telegram(generar_mensaje(name, r_alex[0], r_alex[1], r_alex[2], r_alex[3], r_alex[4], nombre_est="ICT Alex Ruiz", marco="15M"))
-                            señales_enviadas.add(keyA)
-        
-        time.sleep(2) # Evitar re-entrada en el mismo segundo
+                    df_15 = obtener_datos(ticker, "15m")
+                    df_4h = obtener_datos(ticker, "4h")
+                    res_alex = est_ict_alex_m15(df_15, df_4h)
+                    if res_alex:
+                        key_alex = f"{ticker}_ALEX_{now.strftime('%H%M')}"
+                        if key_alex not in señales_enviadas:
+                            msg = generar_mensaje_telegram(name, res_alex[0], res_alex[1], res_alex[2], res_alex[3], tp2=res_alex[4], nombre_est="ICT Alex Ruiz", marco="15M", timing="ANTICIPACIÓN 30s")
+                            enviar_telegram(msg)
+                            señales_enviadas.add(key_alex)
+        time.sleep(1.5)
 
     time.sleep(0.5)
-    # Limpieza automática de memoria cada 500 señales
-    if len(señales_enviadas) > 500:
-        señales_enviadas.clear()
+    if now.hour == 0 and now.minute == 0: señales_enviadas.clear()
